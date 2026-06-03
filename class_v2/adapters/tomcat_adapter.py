@@ -149,16 +149,11 @@ class TomcatRuntimeAdapter:
         utils = self._get_tomcat_utils()
         installed = []
         for ver_str in CapabilityRegistry.get_supported_tomcat_versions():
-            ver_int = 0
             try:
                 ver_int = int(ver_str.split(".")[0])
             except ValueError:
-                # e.g. "10.1" -> 10 via utils.bt_tomcat
-                try:
-                    ver_int = int(ver_str.split(".")[0])
-                except ValueError:
-                    continue
-            tc = utils.bt_tomcat(ver_int) if ver_int else utils.bt_tomcat(ver_str)
+                continue
+            tc = utils.bt_tomcat(ver_int)
             if tc is not None and tc.installed:
                 installed.append(ver_str)
         return installed

@@ -82,12 +82,17 @@ class PgsqlProjectAdapter:
         3. /usr/bin/postgres (system installation)
         4. pg_config or which postgres (PATH-based)
         """
+        if self._cached_install is not None:
+            return self._cached_install
+
+        result = None
+
         # 1. Panel-managed installation
         panel_bin = os.path.join(self._PG_PANEL_BIN_DIR, "postgres")
         if os.path.isfile(panel_bin) or os.path.isfile(os.path.join(self._PG_PANEL_BIN_DIR, "pg_config")):
             version = self._get_panel_version()
             port = self._get_panel_port()
-            return {
+            result = {
                 "installation_type": "panel_managed",
                 "version": version,
                 "port": port,
@@ -96,16 +101,15 @@ class PgsqlProjectAdapter:
             }
 
         # 2. Distro packages (/usr/lib/postgresql/*)
-        distro_info = self._detect_distro_package()
-        if distro_info is not None:
-            return distro_info
+        if result is None:
+            result = self._detect_distro_package()
 
         # 3. System installation (/usr/bin/postgres)
-        if os.path.isfile("/usr/bin/postgres"):
+        if result is None and os.path.isfile("/usr/bin/postgres"):
             version = self._get_binary_version("/usr/bin/postgres")
             if version:
                 distro_bin = os.path.join(self._DISTRO_BASE_DIR, version, "bin")
-                return {
+                result = {
                     "installation_type": "distro",
                     "version": version,
                     "port": 5432,
@@ -114,55 +118,58 @@ class PgsqlProjectAdapter:
                 }
 
         # 4. PATH-based (pg_config or which postgres)
-        pg_config_path = self._which("pg_config")
-        if pg_config_path:
-            version = self._get_binary_version(pg_config_path)
-            if version:
-                bin_dir = os.path.dirname(pg_config_path)
-                return {
-                    "installation_type": "distro",
-                    "version": version,
-                    "port": 5432,
-                    "data_dir": self._try_find_data_dir(),
-                    "bin_dir": bin_dir,
-                }
+        if result is None:
+            pg_config_path = self._which("pg_config")
+            if pg_config_path:
+                version = self._get_binary_version(pg_config_path)
+                if version:
+                    bin_dir = os.path.dirname(pg_config_path)
+                    result = {
+                        "installation_type": "distro",
+                        "version": version,
+                        "port": 5432,
+                        "data_dir": self._try_find_data_dir(),
+                        "bin_dir": bin_dir,
+                    }
 
-        postgres_path = self._which("postgres")
-        if postgres_path:
-            version = self._get_binary_version(postgres_path)
-            if version:
-                bin_dir = os.path.dirname(postgres_path)
-                return {
-                    "installation_type": "distro",
-                    "version": version,
-                    "port": 5432,
-                    "data_dir": self._try_find_data_dir(),
-                    "bin_dir": bin_dir,
-                }
+        if result is None:
+            postgres_path = self._which("postgres")
+            if postgres_path:
+                version = self._get_binary_version(postgres_path)
+                if version:
+                    bin_dir = os.path.dirname(postgres_path)
+                    result = {
+                        "installation_type": "distro",
+                        "version": version,
+                        "port": 5432,
+                        "data_dir": self._try_find_data_dir(),
+                        "bin_dir": bin_dir,
+                    }
 
-        return None
+        self._cached_install = result
+        return result
 
     def is_running(self) -> bool:
         """Check if the PostgreSQL service is currently running."""
+        install = self._cached_install or self.detect_local_installation()
+        if not self._cached_install:
+            self._cached_install = install
+
         # Check panel-managed init script
         result = public.ExecShell("/etc/init.d/pgsql status 2>/dev/null")
         if result and len(result) >= 2 and result[1].find("running") != -1:
             return True
 
         # Check pg_isready utility
-        install = self.detect_local_installation()
         if install:
             pg_isready_bin = os.path.join(install["bin_dir"], "pg_isready")
             if os.path.isfile(pg_isready_bin):
-                # Try running as postgres user
                 out = public.ExecShell("su - postgres -c '" + pg_isready_bin + " -q 2>/dev/null' && echo OK || echo FAIL")
                 if out and len(out) > 0 and "OK" in out[0]:
                     return True
-
-            # Try with sudo
-            out = public.ExecShell(pg_isready_bin + " -q 2>/dev/null && echo OK || echo FAIL")
-            if out and len(out) > 0 and "OK" in out[0]:
-                return True
+                out = public.ExecShell(pg_isready_bin + " -q 2>/dev/null && echo OK || echo FAIL")
+                if out and len(out) > 0 and "OK" in out[0]:
+                    return True
 
         # Check process list
         result = public.ExecShell("pgrep -x postgres 2>/dev/null")
@@ -246,33 +253,36 @@ class PgsqlProjectAdapter:
         except Exception:
             return {"status": False, "msg": "Failed to build request arguments."}
 
-        # TODO: pgsqlModel.AddDatabase() auto-creates username/password via base class
-        # and stores them in the databases table with pid. For project integration,
-        # we need to ensure our provided username/password are used. This requires
-        # either a custom variant or post-creation update.
         try:
             result = self._model().AddDatabase(args)
         except Exception as e:
+            duplicate_msg = str(e).lower()
+            if 'already exists' in duplicate_msg or 'duplicate' in duplicate_msg:
+                existing = self.get_project_database(str(pid))
+                if existing:
+                    return {"status": True, "data": existing}
             return {"status": False, "msg": "AddDatabase failed: {}".format(str(e))}
 
+        # Parse result - pgsqlModel uses public.return_message / public.success_v2 / public.fail_v2
         if result is None:
             return {"status": False, "msg": "AddDatabase returned None - operation may have partially succeeded."}
 
-        # Parse result - pgsqlModel uses public.return_message / public.success_v2 / public.fail_v2
         if isinstance(result, dict):
             status_flag = result.get("status")
-            if status_flag == 1 or status_flag is True:
-                pass  # success
-            else:
+            if status_flag != 1 and status_flag is not True:
                 msg = result.get("msg", result.get("message", "Unknown error"))
+                # Check for duplicate database error in structured response
+                if msg and ('already exists' in str(msg).lower() or 'duplicate' in str(msg).lower()):
+                    existing = self.get_project_database(str(pid))
+                    if existing:
+                        return {"status": True, "data": existing}
                 return {"status": False, "msg": str(msg)}
-        # If result is a raw tuple (status, code, data) from return_message
         elif isinstance(result, tuple):
             if len(result) >= 1 and result[0] != 0:
                 msg = result[-1] if len(result) >= 3 else "Unknown error"
                 return {"status": False, "msg": str(msg)}
 
-        # 6. Verify the database was created and return consistent credentials
+        # Verify the database was created and return consistent credentials
         db_find = public.M("databases").where(
             "pid=? AND LOWER(type)=LOWER('PgSql')", (pid,)
         ).field("name,username,password").find()
@@ -369,58 +379,6 @@ class PgsqlProjectAdapter:
                 "addtime": row.get("addtime", ""),
             })
         return results
-
-    # ------------------------------------------------------------------
-    # User Management
-    # ------------------------------------------------------------------
-
-    def create_least_privilege_user(self, db_name: str) -> dict:
-        """
-        Create a least-privilege database user with:
-        - CONNECT on the database
-        - USAGE, CREATE on schema public
-        - ALL on all tables, sequences, functions in public
-        - ALTER DEFAULT PRIVILEGES for new tables
-        Returns: {"status": True, "data": {"username": ..., "password": ...}}
-                 or {"status": False, "msg": "..."}
-        """
-        install = self.detect_local_installation()
-        if install is None:
-            return {"status": False, "msg": "No local PostgreSQL installation detected."}
-
-        if not self.is_running():
-            return {"status": False, "msg": "PostgreSQL is not running."}
-
-        username = self._generate_db_user(db_name)
-        password = self._generate_password()
-
-        # Use the existing pgsqlModel's AddDatabase which internally calls
-        # __CreateUsers and handles GRANT CONNECT, USAGE, CREATE on schema.
-        try:
-            from databaseModelV2.pgsqlModel import main as pgsqlModel
-
-            get_obj = public.to_dict_obj({
-                "name": db_name,
-                "sid": 0,
-                "db_user": username,
-                "password": password,
-                "listen_ip": "127.0.0.1/32",
-                "ps": "Created by tomcat adapter (least-privilege user for {})".format(db_name),
-            })
-            model = pgsqlModel()
-            result = model.AddDatabase(get_obj)
-            if isinstance(result, dict) and not result.get("status", True):
-                return {"status": False, "msg": "Failed to create database user: {}".format(result.get("msg", "unknown error"))}
-        except Exception as e:
-            return {"status": False, "msg": "Failed to create least-privilege user: {}".format(str(e))}
-
-        return {
-            "status": True,
-            "data": {
-                "username": username,
-                "password": password,
-            },
-        }
 
     # ------------------------------------------------------------------
     # Internal Helpers

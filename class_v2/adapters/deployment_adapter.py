@@ -44,7 +44,7 @@ class DeploymentAdapter:
     ACCEPTED_SOURCES = frozenset({"browser_upload", "server_path", "url", "exploded_dir"})
 
     DEFAULT_HEALTH_CHECK_PATH = "/"
-    DEFAULT_HEALTH_CHECK_TIMEOUT = 10  # seconds
+    DEFAULT_HEALTH_CHECK_TIMEOUT = 5
     HEALTH_CHECK_RETRIES = 3
     HEALTH_CHECK_INTERVAL = 2  # seconds
     MAX_RELEASES_KEEP = 5
@@ -483,7 +483,7 @@ class DeploymentAdapter:
                 "{}/bin/startup.sh".format(alternate_project_dir)
             )
 
-            time.sleep(3)
+            self._wait_for_port(alternate_port, timeout=15)
 
             health_path = project_config.get("health_check_path", self.DEFAULT_HEALTH_CHECK_PATH)
             health_result = self.health_check(project_id, health_path, alternate_port)
@@ -502,17 +502,6 @@ class DeploymentAdapter:
                         project_name, alternate_port,
                         domain=domain if isinstance(domain, str) else domain
                     )
-
-            time.sleep(2)
-
-            health_result2 = self.health_check(project_id, health_path, alternate_port)
-            if not health_result2.get("status"):
-                self._set_project_nginx_proxy_port(project_name, current_port)
-                self._stop_isolated_instance(alternate_project_dir)
-                shutil.rmtree(alternate_project_dir, ignore_errors=True)
-                return {"status": False, "msg": "Health check failed after nginx switch: {}".format(
-                    health_result2.get("msg", "unknown error")
-                )}
 
             project_config["port"] = alternate_port
             public.M("sites").where("name=?", (project_name,)).update(
@@ -567,6 +556,23 @@ class DeploymentAdapter:
                 count=1
             )
             public.writeFile(server_xml, content)
+
+    def _wait_for_port(self, port: int, timeout: int = 15) -> None:
+        """Poll until the port is accepting connections or timeout expires."""
+        import socket
+        start = time.time()
+        while (time.time() - start) < timeout:
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(1)
+                result = sock.connect_ex(('127.0.0.1', port))
+                sock.close()
+                if result == 0:
+                    return
+            except Exception:
+                pass
+            time.sleep(0.5)
+        raise HintException("Timed out waiting for port {} ({} s)".format(port, timeout))
 
     def _stop_isolated_instance(self, tomcat_home: str) -> None:
         shutdown_script = os.path.join(tomcat_home, "bin", "shutdown.sh")

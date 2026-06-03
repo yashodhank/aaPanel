@@ -1414,7 +1414,15 @@ include /www/server/panel/vhost/openlitespeed/proxy/BTSITENAME/*.conf
                 (project_name, project_path, '1', ps, type_id, public.getDate(), 'Java')
             )
         except Exception as ex:
-            return public.fail_v2('Database insert failed: {}'.format(str(ex)))
+            duplicate_msg = str(ex).lower()
+            if 'duplicate' in duplicate_msg or 'unique' in duplicate_msg:
+                existing = public.M('sites').where("name=?", (project_name,)).field('id').find()
+                if existing:
+                    pid = existing['id']
+                else:
+                    return public.fail_v2('Site creation failed: concurrent duplicate detected')
+            else:
+                return public.fail_v2('Database insert failed: {}'.format(str(ex)))
 
         cleanup_needed = False
         try:

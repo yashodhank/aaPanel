@@ -432,7 +432,7 @@ class TomcatRuntimeAdapter:
         get.project_name = contract["name"]
         get.domain = contract["domain"]
         get.project_path = contract["path"]
-        get.tomcat_version = contract["tomcat_version"]
+        get.tomcat_version = VersionNormalizer.normalize_tomcat_version(contract["tomcat_version"])
         get.project_ps = contract.get("description", contract["name"])
 
         # Port handling

@@ -62,12 +62,20 @@ class main(dataBase):
         db_obj = public.M(get.table)
         domain_obj = public.M('domain')
         for val in data_list:
-            if 'project_config' in  val.keys():
-                val['project_config'] = json.loads(val['project_config'])
+            if 'project_config' in val.keys():
+                if isinstance(val['project_config'], str):
+                    try:
+                        val['project_config'] = json.loads(val['project_config'])
+                    except (json.JSONDecodeError, TypeError, ValueError):
+                        val['project_config'] = {}
+                elif not isinstance(val['project_config'], dict):
+                    val['project_config'] = {}
                 if 'type' in  val["project_config"].keys() and 'PHPMOD' == val["project_config"]["type"]:
                     val = self.get_php_mod_status(val)
                     val['status'] = 1 if realserver.daemon_status(val['name'])['status'] else 0
                     public.M(get.table).where("id=?", (val['id'],)).setField('status', val['status'])
+                elif val.get('project_type') == 'Java':
+                    val = self._get_java_runtime_status(val)
             val['backup_count'] = public.M('backup').where("pid=? and type=?", (val['id'],'0')).count()
             val['domain'] = domain_obj.where("pid=?", (val['id'],)).count()
             val['ssl'] = self.get_site_ssl_info(val['name'])
@@ -428,6 +436,34 @@ class main(dataBase):
                     else:
                         wheres.append("(type_id = {})".format(get.type))
         return wheres
+
+    @staticmethod
+    def _get_java_runtime_status(val):
+        """
+        Compute the operational status of a Java/Tomcat project from runtime metadata.
+        Java projects have status derived from the actual Tomcat process/port health,
+        not from a stale DB field.
+        """
+        project_config = val.get('project_config', {})
+        if not isinstance(project_config, dict):
+            val['status'] = '0'
+            return val
+
+        port = int(project_config.get('port', 0))
+        if not port or port < 1:
+            val['status'] = '0'
+            return val
+
+        try:
+            import socket
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(2)
+            result = sock.connect_ex(('127.0.0.1', port))
+            sock.close()
+            val['status'] = '1' if result == 0 else '0'
+        except Exception:
+            val['status'] = '0'
+        return val
 
     def get_runtime_counts(self, get=None):
         rows = public.M('sites').field('project_type,count(*) as cnt').group('project_type').select()

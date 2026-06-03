@@ -143,3 +143,20 @@ class VersionNormalizer:
     @staticmethod
     def _sort_key(version_str: str) -> Tuple[int, ...]:
         return tuple(int(p) for p in version_str.split("."))
+
+    # Legacy mapping: the v2 capability registry uses descriptive versions (8.5, 10.1)
+    # while the legacy javaModel expects integer-based major versions (7, 8, 9, 10).
+    # This mapping bridges the two vocabularies without changing either layer.
+    _TOMCAT_LEGACY_MAP = {"8.5": "8", "10.1": "10"}
+
+    @classmethod
+    def normalize_tomcat_version(cls, version_str: str) -> str:
+        """
+        Map a capability-registry Tomcat version to the legacy major version
+        expected by projectModelV2.javaModel.create_internal_project and
+        create_independent_project.  Registry-only versions (8.5, 10.1) are
+        mapped to their integer-root equivalents; all other versions pass
+        through unchanged so new versions (11) get to the legacy model for
+        its own validation.
+        """
+        return cls._TOMCAT_LEGACY_MAP.get(version_str, version_str)

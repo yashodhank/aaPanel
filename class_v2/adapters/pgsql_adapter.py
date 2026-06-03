@@ -488,11 +488,13 @@ class PgsqlProjectAdapter:
 
     @classmethod
     def _sanitize_name(cls, name: str) -> str:
-        """Sanitize a database name - lowercase, alphanumeric + underscores only."""
+        """Sanitize a database name - lowercase, alphanumeric + underscores only, max 63 chars."""
         name = name.lower().strip()
         name = re.sub(r"[^a-z0-9_]", "_", name)
         if not name:
             name = "project_db"
+        if len(name) > 63:
+            name = name[:63].rstrip("_") or "p"
         return name
 
     @classmethod

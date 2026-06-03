@@ -248,10 +248,20 @@ class DeploymentAdapter:
                 if not self._is_safe_url(url):
                     raise HintException("Unsafe URL: deployment from private/internal addresses is not allowed.")
 
-                public.HttpGet(url, war_path)
+                try:
+                    public.HttpGet(url, war_path)
+                except Exception as fetch_ex:
+                    raise HintException("Failed to fetch WAR from URL: {}".format(str(fetch_ex)))
 
                 if not os.path.exists(war_path) or os.path.getsize(war_path) == 0:
                     raise HintException("Failed to download WAR from URL: {}".format(url))
+
+                # Reject oversized downloads
+                if os.path.getsize(war_path) > self.MAX_UPLOAD_SIZE:
+                    os.remove(war_path)
+                    raise HintException(
+                        "Downloaded WAR exceeds maximum size of {}MB.".format(self.MAX_UPLOAD_SIZE // (1024 * 1024))
+                    )
 
             elif source_type == "exploded_dir":
                 dir_path = source_config.get("path", "")
@@ -323,10 +333,13 @@ class DeploymentAdapter:
         return war_path
 
     def _is_safe_url(self, url: str) -> bool:
-        """Validate URL is safe for fetching: http/https scheme only, no private/reserved IPs."""
+        """Validate URL is safe for fetching: http/https scheme only, no private/reserved IPs, IPv6-aware."""
         import socket
-        import re
         from urllib.parse import urlparse
+
+        # High-level rejections before any network calls
+        if not url or len(url) > 4096:
+            return False
 
         try:
             parsed = urlparse(url)
@@ -340,21 +353,91 @@ class DeploymentAdapter:
         if not hostname:
             return False
 
+        # Resolve all addresses (IPv4 + IPv6) and validate each
         try:
-            ip = socket.gethostbyname(hostname)
+            addrinfo = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+        except socket.gaierror:
+            return False
         except Exception:
-            return True
+            return False
 
-        if ip.startswith("127.") or ip.startswith("10.") or ip.startswith("0."):
+        if not addrinfo:
             return False
-        if ip.startswith("172.") and 16 <= int(ip.split(".")[1]) <= 31:
-            return False
-        if ip.startswith("192.168."):
-            return False
-        if ip.startswith("169.254."):
-            return False
+
+        for family, _, _, _, sockaddr in addrinfo:
+            ip = sockaddr[0]
+            if family == socket.AF_INET:
+                if self._is_private_ipv4(ip):
+                    return False
+            elif family == socket.AF_INET6:
+                if self._is_private_ipv6(ip):
+                    return False
+            else:
+                return False
 
         return True
+
+    @staticmethod
+    def _is_private_ipv4(ip: str) -> bool:
+        """Check whether an IPv4 address falls within any private / reserved range."""
+        parts = ip.split(".")
+        if len(parts) != 4:
+            return True
+        try:
+            octets = [int(p) for p in parts]
+        except ValueError:
+            return True
+        b0, b1 = octets[0], octets[1]
+        # Loopback: 127.0.0.0/8
+        if b0 == 127:
+            return True
+        # Current network (only valid as source): 0.0.0.0/8
+        if b0 == 0:
+            return True
+        # Private: 10.0.0.0/8
+        if b0 == 10:
+            return True
+        # Link-local: 169.254.0.0/16
+        if b0 == 169 and b1 == 254:
+            return True
+        # Private: 172.16.0.0/12
+        if b0 == 172 and 16 <= b1 <= 31:
+            return True
+        # Private: 192.168.0.0/16
+        if b0 == 192 and b1 == 168:
+            return True
+        # Carrier-grade NAT: 100.64.0.0/10
+        if b0 == 100 and 64 <= b1 <= 127:
+            return True
+        # Multicast: 224.0.0.0/4
+        if 224 <= b0 <= 239:
+            return True
+        # Reserved/future: 240.0.0.0/4
+        if b0 >= 240:
+            return True
+        return False
+
+    @staticmethod
+    def _is_private_ipv6(ip: str) -> bool:
+        """Check whether an IPv6 address is loopback, link-local, unique-local, or multicast."""
+        import ipaddress
+        try:
+            addr = ipaddress.IPv6Address(ip)
+        except Exception:
+            return True
+        if addr.is_loopback:
+            return True
+        if addr.is_link_local:
+            return True
+        if addr.is_site_local or getattr(addr, 'is_unique_local', False):
+            return True
+        if addr.is_multicast:
+            return True
+        # IPv4-mapped / IPv4-compatible embedded addresses should also be checked
+        if addr.ipv4_mapped:
+            embedded = str(addr.ipv4_mapped)
+            return DeploymentAdapter._is_private_ipv4(embedded)
+        return False
 
     def activate_release(self, project_id: str, release_id: str, mode: str, project_config: dict) -> dict:
         project_name = project_config.get("project_name", "")
@@ -504,11 +587,15 @@ class DeploymentAdapter:
                         domain=domain if isinstance(domain, str) else domain
                     )
 
-            project_config["port"] = alternate_port
+            # Persist that the active runtime is the isolated alt instance.
+            # The primary runtime (and its server.xml / port) is left untouched so
+            # restart and rollback can fall back to it without port collisions.
+            project_config["active_port"] = alternate_port
+            project_config["active_runtime_home"] = alternate_project_dir
+            project_config["active_release_id"] = release_id
             public.M("sites").where("name=?", (project_name,)).update(
                 {"project_config": json.dumps(project_config)}
             )
-            self._update_primary_tomcat_port(current_project_web, alternate_port)
 
             health_status = "healthy" if health_result.get("data", {}).get("code") in (200, 301, 302) else "unknown"
 
@@ -548,19 +635,6 @@ class DeploymentAdapter:
             count=1
         )
         public.writeFile(server_xml, content)
-
-    def _update_primary_tomcat_port(self, tomcat_home: str, new_port: int) -> None:
-        server_xml = os.path.join(tomcat_home, "conf", "server.xml")
-        if os.path.exists(server_xml):
-            import re
-            content = public.readFile(server_xml)
-            content = re.sub(
-                r'(<Connector[^>]*port=")[^"]*(")',
-                r"\g<1>{}".format(new_port) + r"\g<2>",
-                content,
-                count=1
-            )
-            public.writeFile(server_xml, content)
 
     def _wait_for_port(self, port: int, timeout: int = 15) -> None:
         """Poll until the port is accepting connections or timeout expires."""

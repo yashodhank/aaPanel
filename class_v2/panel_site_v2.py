@@ -21,7 +21,6 @@ except:
     os.system("btpip install pyOpenSSL -I")
     import OpenSSL
 import base64
-import shlex
 
 try:
     from BTPanel import session
@@ -932,8 +931,8 @@ include /www/server/panel/vhost/openlitespeed/proxy/BTSITENAME/*.conf
 
         if not hasattr(get, 'project_type'): get.project_type = "PHP"
 
-        runtime = get.get('runtime', 'php')
-        if _tomcat_support and runtime == 'tomcat':
+        runtime = get.get('runtime', get.get('project_runtime', 'php'))
+        if _tomcat_support and runtime.lower() == 'tomcat':
             return self._create_tomcat_site(get)
         
         self.check_default()
@@ -1323,11 +1322,9 @@ include /www/server/panel/vhost/openlitespeed/proxy/BTSITENAME/*.conf
 
         Returns: public.return_message compatible dict via public.success_v2 / public.fail_v2
         """
-        import json as _json
-
         # --- Parse domain info ---
         try:
-            site_menu = _json.loads(get.webname)
+            site_menu = json.loads(get.webname)
         except Exception:
             return public.fail_v2("The format of the webname parameter is incorrect, it should be a parseable JSON string")
 
@@ -1351,13 +1348,26 @@ include /www/server/panel/vhost/openlitespeed/proxy/BTSITENAME/*.conf
                 return public.fail_v2('The domain you tried to add already exists!')
             public.M('domain').where('pid=?', (opid,)).delete()
 
-        # --- Extract Tomcat fields ---
+        # --- Extract Tomcat fields (canonical names first, then legacy aliases) ---
         tomcat_version = get.get('tomcat_version', '')
         java_version = get.get('java_version', '')
-        deployment_mode = get.get('deployment_mode', 'shared')
-        exposure_mode = get.get('exposure_mode', 'root_domain')
-        database_engine = get.get('database_engine', 'none')
-        deployment_pref = get.get('deployment_pref', 'deploy_later')
+        deployment_mode = get.get('deployment_mode', get.get('tomcat_deploy_mode', 'shared'))
+        exposure_mode = get.get('exposure_mode', get.get('tomcat_exposure', 'root_domain'))
+        database_engine = get.get('database_engine', get.get('tomcat_db_type', 'none'))
+        deployment_pref = get.get('deployment_pref', get.get('tomcat_deploy_pref', 'deploy_later'))
+
+        # Normalize legacy enum values
+        if database_engine == 'PostgreSQL':
+            database_engine = 'pgsql'
+        database_engine = database_engine.lower() if database_engine else 'none'
+        if deployment_pref in ('Deploy later',):
+            deployment_pref = 'deploy_later'
+        elif deployment_pref in ('Upload WAR now',):
+            deployment_pref = 'upload_war'
+        elif deployment_pref in ('Pick from server path',):
+            deployment_pref = 'server_path'
+        elif deployment_pref in ('Deploy from URL',):
+            deployment_pref = 'url'
 
         # --- Validate via CapabilityRegistry ---
         valid, err_msg = CapabilityRegistry.validate_runtime_combo(
@@ -1423,7 +1433,7 @@ include /www/server/panel/vhost/openlitespeed/proxy/BTSITENAME/*.conf
                 "database_engine": database_engine,
             }
             public.M('sites').where('id=?', (pid,)).update(
-                {'project_config': _json.dumps(stored_config)}
+                {'project_config': json.dumps(stored_config)}
             )
         except Exception as ex:
             duplicate_msg = str(ex).lower()
@@ -1537,6 +1547,42 @@ include /www/server/panel/vhost/openlitespeed/proxy/BTSITENAME/*.conf
 
         return public.success_v2(data)
 
+    def get_tomcat_versions(self, get):
+        """
+        Return installed Tomcat versions for the UI version selector.
+
+        Returns: public.success_v2 with {"versions": [...]} or public.fail_v2
+        """
+        try:
+            adapter = TomcatRuntimeAdapter()
+            versions = adapter.get_installed_tomcat_versions()
+            if not versions:
+                versions = CapabilityRegistry.get_supported_tomcat_versions()
+            return public.success_v2({"versions": versions})
+        except Exception as ex:
+            return public.fail_v2("Failed to fetch Tomcat versions: {}".format(str(ex)))
+
+    def get_java_versions(self, get):
+        """
+        Return installed Java versions compatible with the selected Tomcat version.
+
+        Accepts: tomcat_version (str) - optional filter to narrow compatibility
+        Returns: public.success_v2 with {"versions": [...]} or public.fail_v2
+        """
+        try:
+            adapter = TomcatRuntimeAdapter()
+            versions = adapter.get_installed_java_versions()
+            if not versions:
+                versions = ["8", "11", "17", "21"]
+                tomcat_version = get.get('tomcat_version', '')
+                if tomcat_version:
+                    compat = CapabilityRegistry.get_valid_java_versions(tomcat_version)
+                    if compat:
+                        versions = compat
+            return public.success_v2({"versions": versions})
+        except Exception as ex:
+            return public.fail_v2("Failed to fetch Java versions: {}".format(str(ex)))
+
     def deploy_war(self, get):
         """
         Deploy a WAR artifact to an existing Tomcat project.
@@ -1591,8 +1637,13 @@ include /www/server/panel/vhost/openlitespeed/proxy/BTSITENAME/*.conf
         if activation_mode not in ('shared', 'isolated'):
             return public.fail_v2("Unsupported activation_mode '{}'. Use 'shared' or 'isolated'.".format(activation_mode))
 
-        # Prepare source_config from individual args if not provided as a dict
+        # Prepare source_config from request - parse JSON string if sent from frontend
         source_config = get.get('source_config', {})
+        if isinstance(source_config, str):
+            try:
+                source_config = json.loads(source_config)
+            except (json.JSONDecodeError, TypeError, ValueError):
+                source_config = {}
         if not source_config or not isinstance(source_config, dict):
             if source_type == 'server_path':
                 source_config = {'path': get.get('server_path', '')}
@@ -1691,11 +1742,10 @@ include /www/server/panel/vhost/openlitespeed/proxy/BTSITENAME/*.conf
         project_path = site.get('path', '')
         project_config_str = site.get('project_config', '{}')
 
-        import json as _json
         project_config = {}
         try:
             if isinstance(project_config_str, str):
-                project_config = _json.loads(project_config_str) if project_config_str else {}
+                project_config = json.loads(project_config_str) if project_config_str else {}
             elif isinstance(project_config_str, dict):
                 project_config = project_config_str
         except Exception:

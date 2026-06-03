@@ -3281,6 +3281,21 @@ var site = {
 			class: '',
 			form: [
 				{
+					label: 'Project Runtime',
+					must: '*',
+					group: {
+						type: 'radio',
+						name: 'project_runtime',
+						label_tips: ['PHP', 'Tomcat / Java'],
+						style: { 'margin-right': '16px' },
+						event: function (value, form, that, config, ev) {
+							var runtime = $(this).find('input[name=project_runtime]:checked').val();
+							if (typeof runtime === 'undefined') runtime = 'PHP';
+							add_web._toggle_runtime_fields(runtime);
+						},
+					},
+				},
+				{
 					label: lan.site.add_site.domain,
 					must: '*',
 					group: [
@@ -3414,6 +3429,7 @@ var site = {
 				},
 				{
 					label: lan.site.add_site.ftp,
+					class: 'php_runtime_field',
 					group: [
 						{
 							type: 'select',
@@ -3450,6 +3466,7 @@ var site = {
 				},
 				{
 					label: lan.site.add_site.ftp_set,
+					class: 'php_runtime_field',
 					hide: true,
 					group: [
 						{
@@ -3473,6 +3490,7 @@ var site = {
 				},
 				{
 					label: lan.site.add_site.database,
+					class: 'php_runtime_field',
 					group: [
 						{
 							type: 'select',
@@ -3529,6 +3547,7 @@ var site = {
 				},
 				{
 					label: lan.site.add_site.database_set,
+					class: 'php_runtime_field',
 					hide: true,
 					group: [
 						{
@@ -3554,6 +3573,7 @@ var site = {
 				},
 				{
 					label: lan.site.add_site.php_version,
+					class: 'php_runtime_field',
 					group: [
 						{
 							type: 'select',
@@ -3575,6 +3595,7 @@ var site = {
 				},
 				{
 					label: lan.site.add_site.category,
+					class: 'php_runtime_field',
 					group: [
 						{
 							type: 'select',
@@ -3607,7 +3628,7 @@ var site = {
 				},
 				{
 					label: 'SSL',
-					class: 'ssl_checkbox',
+					class: 'ssl_checkbox php_runtime_field',
 					help: {
 						style: 'color: red;line-height: 17px;margin-top: 8px;',
 						list: ['If you need to apply for SSL, please make sure that the domain name has added A record resolution for the domain name'],
@@ -3778,6 +3799,75 @@ var site = {
 			],
 		});
 
+		add_web._toggle_runtime_fields = function (runtime) {
+			var phpFields = add_web.element.find('.php_runtime_field');
+			var tomcatFields = add_web.element.find('.tomcat_runtime_field');
+			if (runtime === 'PHP' || typeof runtime === 'undefined') {
+				phpFields.removeClass('hide');
+				tomcatFields.addClass('hide');
+			} else {
+				phpFields.addClass('hide');
+				tomcatFields.removeClass('hide');
+				add_web._load_tomcat_versions();
+			}
+		};
+
+		add_web._load_tomcat_versions = function () {
+			bt.send('get_tomcat_versions', '/project?action=get_tomcat_versions', {}, function (rdata) {
+				if (rdata && rdata.versions) {
+					var add_web_element = add_web.element;
+					var select = add_web_element.find('[data-name="tomcat_version"]');
+					if (select.length === 0) return;
+					var html = '';
+					for (var i = 0; i < rdata.versions.length; i++) {
+						html += '<li data-val="' + rdata.versions[i] + '">' + rdata.versions[i] + '</li>';
+					}
+					select.find('.bt_select_list').html(html);
+					select.find('.bt_select_list li').on('click', function () {
+						var val = $(this).data('val');
+						select.find('.bt_select_val').text(val);
+						select.find('.bt_select_list').removeClass('show');
+						select.find('input[type=hidden]').val(val);
+						add_web._load_java_versions(val);
+					});
+					select.find('.bt_select_val').on('click', function (e) {
+						e.stopPropagation();
+						select.find('.bt_select_list').toggleClass('show');
+					});
+				}
+			});
+		};
+
+		add_web._load_java_versions = function (tomcatVersion) {
+			bt.send('get_java_versions', '/project?action=get_java_versions', { tomcat_version: tomcatVersion }, function (rdata) {
+				if (rdata && rdata.versions) {
+					var add_web_element = add_web.element;
+					var select = add_web_element.find('[data-name="java_version"]');
+					if (select.length === 0) return;
+					var html = '';
+					for (var i = 0; i < rdata.versions.length; i++) {
+						html += '<li data-val="' + rdata.versions[i] + '">' + rdata.versions[i] + '</li>';
+					}
+					select.find('.bt_select_list').html(html);
+					select.find('.bt_select_list li').on('click', function () {
+						var val = $(this).data('val');
+						select.find('.bt_select_val').text(val);
+						select.find('.bt_select_list').removeClass('show');
+						select.find('input[type=hidden]').val(val);
+					});
+					select.find('.bt_select_val').on('click', function (e) {
+						e.stopPropagation();
+						select.find('.bt_select_list').toggleClass('show');
+					});
+				}
+			});
+		};
+
+		// Initialize runtime to PHP
+		setTimeout(function () {
+			add_web._toggle_runtime_fields('PHP');
+		}, 100);
+
 		var web_tab = bt_tools.tab({
 			class: 'pd20',
 			type: 0,
@@ -3853,8 +3943,11 @@ var site = {
 					}
 					var webname = bt.replace_all(formValue.webname, 'http[s]?:\\/\\/', ''),
 						web_list = webname.split('\n'),
-						param = { webname: { domain: '', domainlist: [], count: 0 }, type: 'PHP', port: 80 },
-						arry = ['ps', ['path', lan.site.site_menu_2], 'type_id', 'version', 'ftp', 'sql', 'ftp_username', 'ftp_password', 'datauser', 'datapassword', 'codeing'];
+						project_runtime = formValue.project_runtime || 'PHP';
+
+					if (project_runtime === 'PHP') {
+						var param = { webname: { domain: '', domainlist: [], count: 0 }, type: 'PHP', port: 80 },
+							arry = ['ps', ['path', lan.site.site_menu_2], 'type_id', 'version', 'ftp', 'sql', 'ftp_username', 'ftp_password', 'datauser', 'datapassword', 'codeing'];
 					for (var i = 0; i < web_list.length; i++) {
 						var temps = web_list[i].replace(/\r\n/, '').split(':');
 						if (i === 0) {
@@ -3936,6 +4029,118 @@ var site = {
 							bt.msg(rdata);
 						}
 					});
+					} else {
+						// Tomcat/Java runtime
+						var tparam = { webname: { domain: '', domainlist: [], count: 0 }, type: 'Tomcat', port: 8080 };
+						for (var i = 0; i < web_list.length; i++) {
+							var temps = web_list[i].replace(/\r\n/, '').split(':');
+							if (i === 0) {
+								tparam['webname']['domain'] = web_list[i];
+								if (typeof temps[1] != 'undefined') tparam['port'] = temps[1];
+							} else {
+								tparam['webname']['domainlist'].push(web_list[i]);
+							}
+						}
+						tparam['webname']['count'] = tparam['webname']['domainlist'].length;
+						tparam['webname'] = JSON.stringify(tparam['webname']);
+
+						tparam['ps'] = formValue.ps;
+						tparam['path'] = formValue.path;
+						tparam['project_runtime'] = 'Tomcat';
+						tparam['tomcat_deploy_mode'] = formValue.tomcat_deploy_mode;
+						tparam['tomcat_version'] = formValue.tomcat_version;
+						tparam['java_version'] = formValue.java_version;
+						tparam['tomcat_exposure'] = formValue.tomcat_exposure;
+
+						if (!tparam.tomcat_deploy_mode) {
+							bt_tools.msg('Please select a deployment mode', 2);
+							return;
+						}
+						if (!tparam.tomcat_version) {
+							bt_tools.msg('Please select a Tomcat version', 2);
+							return;
+						}
+						if (!tparam.java_version) {
+							bt_tools.msg('Please select a Java version', 2);
+							return;
+						}
+
+						var db_enabled = $('input[name=tomcat_db_enable]').is(':checked');
+						if (db_enabled) {
+							tparam['tomcat_db_enable'] = true;
+							tparam['tomcat_db_type'] = formValue.tomcat_db_type;
+							if (formValue.tomcat_db_type === 'PostgreSQL') {
+								tparam['tomcat_db_name'] = formValue.tomcat_db_name;
+								tparam['tomcat_db_user'] = formValue.tomcat_db_user;
+								tparam['tomcat_db_pass'] = formValue.tomcat_db_pass;
+								if (!tparam.tomcat_db_name || !tparam.tomcat_db_user || !tparam.tomcat_db_pass) {
+									bt_tools.msg('Please fill in all PostgreSQL database fields', 2);
+									return;
+								}
+							}
+						}
+
+						var deploy_pref = formValue.tomcat_deploy_pref;
+						tparam['tomcat_deploy_pref'] = deploy_pref || 'Deploy later';
+						if (deploy_pref === 'Upload WAR now') {
+							tparam['tomcat_war_upload'] = formValue.tomcat_war_upload;
+							if (!tparam.tomcat_war_upload) {
+								bt_tools.msg('Please select a WAR file to upload', 2);
+								return;
+							}
+						} else if (deploy_pref === 'Pick from server path') {
+							tparam['tomcat_war_path'] = formValue.tomcat_war_path;
+							if (!tparam.tomcat_war_path) {
+								bt_tools.msg('Please specify a server path to the WAR file', 2);
+								return;
+							}
+						} else if (deploy_pref === 'Deploy from URL') {
+							tparam['tomcat_war_url'] = formValue.tomcat_war_url;
+							if (!tparam.tomcat_war_url) {
+								bt_tools.msg('Please enter the WAR deploy URL', 2);
+								return;
+							}
+						}
+
+						bt.send('AddSite', 'site/AddSite', tparam, function (rdata) {
+							loading.close();
+							if (rdata.siteStatus) {
+								layer.close(indexs);
+								if (callback) callback(rdata, tparam);
+
+								var nextSteps = '';
+								var deployPref = tparam.tomcat_deploy_pref;
+								if (deployPref === 'Deploy later') {
+									nextSteps += '<div class="line" style="padding:10px 0"><a class="btn btn-success btn-sm" href="javascript:;" onclick="site.deploy_war(\'' + rdata.siteId + '\')">Deploy WAR</a></div>';
+								}
+								if (tparam.tomcat_db_enable) {
+									nextSteps += '<div class="line"><p><strong>Database Credentials:</strong></p>';
+									if (tparam.tomcat_db_type === 'PostgreSQL') {
+										nextSteps += '<p>Name: ' + (tparam.tomcat_db_name || '') + '</p>';
+										nextSteps += '<p>User: ' + (tparam.tomcat_db_user || '') + '</p>';
+										nextSteps += '<p>Password: ' + (tparam.tomcat_db_pass || '') + '</p>';
+									}
+									nextSteps += '</div>';
+								}
+								nextSteps += '<div class="line" style="padding:10px 0"><a class="btlink" href="javascript:;" onclick="bt.site.php_table_view()">Manage Projects</a></div>';
+
+								if (nextSteps === '') {
+									bt.msg({ msg: 'Tomcat project created successfully', icon: 1 });
+								} else {
+									bt.open({
+										type: 1,
+										area: '550px',
+										title: 'Tomcat Project Created',
+										closeBtn: 2,
+										shadeClose: false,
+										content: "<div class='success-msg'><div class='pic'><img src='/static/img/success-pic.png'></div><div class='suc-con'>" + nextSteps + '</div></div>',
+									});
+								}
+							} else {
+								bt.msg(rdata);
+							}
+						});
+					}
 				} else if (tabActive == 1) {
 					//批量创建
 					var loading = bt.load();
@@ -4091,6 +4296,65 @@ var site = {
 						}
 					});
 				}
+			},
+		});
+	},
+	deploy_war: function (siteId) {
+		var dform = bt_tools.form({
+			form: [
+				{
+					label: 'WAR File',
+					group: {
+						type: 'text',
+						name: 'deploy_war_file',
+						width: '320px',
+						placeholder: 'Click to select a WAR file (max 200MB)',
+						icon: {
+							type: 'glyphicon-folder-open',
+							select: 'file',
+							event: function (ev, that, input) {
+								bt.select_path('deploy_war_file', 'file', function (path) {
+									input.val(path);
+								});
+							},
+						},
+					},
+				},
+			],
+		});
+		bt_tools.open({
+			title: 'Deploy WAR to Project',
+			skin: 'custom_layer',
+			btn: [lan.public.submit, lan.site.no],
+			content: dform.$reader_content(),
+			success: function ($layer) {
+				dform.$event_bind();
+			},
+			yes: function (indexs) {
+				var fv = dform.$get_form_value();
+				if (!fv.deploy_war_file) {
+					bt_tools.msg('Please select a WAR file', 2);
+					return false;
+				}
+				var ext = fv.deploy_war_file.split('.').pop().toLowerCase();
+				if (ext !== 'war') {
+					bt_tools.msg('Only .war files are supported', 2);
+					return false;
+				}
+				var loading = bt.load('Deploying WAR, please wait...');
+				bt.send('deploy_war', '/project?action=deploy_war', {
+					site_id: siteId,
+					war_file: fv.deploy_war_file,
+				}, function (rdata) {
+					loading.close();
+					if (rdata.status) {
+						layer.close(indexs);
+						bt.msg({ msg: 'WAR deployed successfully', icon: 1 });
+						site_table.$refresh_table_list(true);
+					} else {
+						bt.msg(rdata);
+					}
+				});
 			},
 		});
 	},
@@ -12307,9 +12571,228 @@ var site = {
 									items: [
 										{ name: 'key', width: '48%', height: '220px', type: 'textarea', value: rdata.key },
 										{ name: 'csr', width: '48%', height: '220px', type: 'textarea', value: rdata.csr },
-									],
-								},
-								{
+					],
+				},
+				{
+					label: 'Deployment Mode',
+					class: 'tomcat_runtime_field',
+					must: '*',
+					hide: true,
+					group: {
+						type: 'radio',
+						name: 'tomcat_deploy_mode',
+						label_tips: ['Shared', 'Isolated'],
+						style: { 'margin-right': '16px' },
+					},
+					help: {
+						list: ['Shared: Multiple sites share one Tomcat instance', 'Isolated: Dedicated Tomcat instance for this project'],
+					},
+				},
+				{
+					label: 'Tomcat Version',
+					class: 'tomcat_runtime_field',
+					must: '*',
+					hide: true,
+					group: {
+						type: 'select',
+						name: 'tomcat_version',
+						width: '200px',
+						list: [],
+						placeholder: 'Select Tomcat version',
+						change: function (value, form, that, config, ev) {
+							var tv = value['tomcat_version'];
+							if (tv) {
+								add_web._load_java_versions(tv);
+							}
+						},
+					},
+				},
+				{
+					label: 'Java Version',
+					class: 'tomcat_runtime_field',
+					must: '*',
+					hide: true,
+					group: {
+						type: 'select',
+						name: 'java_version',
+						width: '200px',
+						list: [],
+						placeholder: 'Select Java version',
+					},
+				},
+				{
+					label: 'Exposure Mode',
+					class: 'tomcat_runtime_field',
+					hide: true,
+					group: {
+						type: 'select',
+						name: 'tomcat_exposure',
+						width: '200px',
+						list: [
+							{ title: 'Root domain', value: 'root' },
+							{ title: 'Subdirectory bind', value: 'subdirectory' },
+						],
+					},
+				},
+				{
+					label: 'Database',
+					class: 'tomcat_runtime_field',
+					hide: true,
+					group: [
+						{
+							type: 'checkbox',
+							name: 'tomcat_db_enable',
+							title: 'Provision a database for this project',
+							event: function (value, form, that, config, ev) {
+								var checked = $(this).find('input[name=tomcat_db_enable]').is(':checked');
+								if (checked) {
+									form['tomcat_db_type'].parents('.line').removeClass('hide');
+								} else {
+									form['tomcat_db_type'].parents('.line').addClass('hide');
+									form['tomcat_db_name'].parents('.line').addClass('hide');
+									form['tomcat_db_user'].parents('.line').addClass('hide');
+									form['tomcat_db_pass'].parents('.line').addClass('hide');
+								}
+							},
+						},
+					],
+				},
+				{
+					label: 'Database Type',
+					class: 'tomcat_runtime_field',
+					hide: true,
+					group: {
+						type: 'select',
+						name: 'tomcat_db_type',
+						width: '200px',
+						list: [
+							{ title: 'MySQL', value: 'MySQL' },
+							{ title: 'PostgreSQL', value: 'PostgreSQL' },
+						],
+						change: function (value, form, that, config, ev) {
+							if (value['tomcat_db_type'] === 'PostgreSQL') {
+								form['tomcat_db_name'].parents('.line').removeClass('hide');
+								form['tomcat_db_user'].parents('.line').removeClass('hide');
+								form['tomcat_db_pass'].parents('.line').removeClass('hide');
+							} else {
+								form['tomcat_db_name'].parents('.line').addClass('hide');
+								form['tomcat_db_user'].parents('.line').addClass('hide');
+								form['tomcat_db_pass'].parents('.line').addClass('hide');
+							}
+						},
+					},
+				},
+				{
+					label: 'Database Name',
+					class: 'tomcat_runtime_field',
+					hide: true,
+					group: {
+						type: 'text',
+						name: 'tomcat_db_name',
+						width: '200px',
+						placeholder: 'Enter database name',
+					},
+				},
+				{
+					label: 'Database Username',
+					class: 'tomcat_runtime_field',
+					hide: true,
+					group: {
+						type: 'text',
+						name: 'tomcat_db_user',
+						width: '200px',
+						placeholder: 'Enter database username',
+					},
+				},
+				{
+					label: 'Database Password',
+					class: 'tomcat_runtime_field',
+					hide: true,
+					group: {
+						type: 'text',
+						name: 'tomcat_db_pass',
+						width: '200px',
+						placeholder: 'Enter database password',
+					},
+				},
+				{
+					label: 'Deployment',
+					class: 'tomcat_runtime_field',
+					hide: true,
+					group: {
+						type: 'radio',
+						name: 'tomcat_deploy_pref',
+						label_tips: ['Deploy later', 'Upload WAR now', 'Pick from server path', 'Deploy from URL'],
+						style: { 'margin-right': '8px' },
+						event: function (value, form, that, config, ev) {
+							var pref = $(this).find('input[name=tomcat_deploy_pref]:checked').val();
+							var uploadLine = form['tomcat_war_upload'].parents('.line');
+							var pathLine = form['tomcat_war_path'].parents('.line');
+							var urlLine = form['tomcat_war_url'].parents('.line');
+							uploadLine.addClass('hide');
+							pathLine.addClass('hide');
+							urlLine.addClass('hide');
+							if (pref === 'Upload WAR now') {
+								uploadLine.removeClass('hide');
+							} else if (pref === 'Pick from server path') {
+								pathLine.removeClass('hide');
+							} else if (pref === 'Deploy from URL') {
+								urlLine.removeClass('hide');
+							}
+						},
+					},
+				},
+				{
+					label: 'WAR File',
+					class: 'tomcat_runtime_field',
+					hide: true,
+					group: {
+						type: 'text',
+						name: 'tomcat_war_upload',
+						width: '300px',
+						placeholder: 'Click to select a WAR file (max 200MB)',
+						icon: {
+							type: 'glyphicon-folder-open',
+							select: 'file',
+							event: function (ev, that, input) {
+								bt.select_path('tomcat_war_upload', 'file', function (path) {
+									input.val(path);
+								});
+							},
+						},
+					},
+				},
+				{
+					label: 'Server Path',
+					class: 'tomcat_runtime_field',
+					hide: true,
+					group: {
+						type: 'text',
+						name: 'tomcat_war_path',
+						width: '300px',
+						placeholder: 'Enter absolute path to WAR on server',
+						icon: {
+							type: 'glyphicon-folder-open',
+							event: function (ev, that, input) {
+								bt.select_path('tomcat_war_path', 'file', function (path) {
+									input.val(path);
+								});
+							},
+						},
+					},
+				},
+				{
+					label: 'Deploy URL',
+					class: 'tomcat_runtime_field',
+					hide: true,
+					group: {
+						type: 'text',
+						name: 'tomcat_war_url',
+						width: '300px',
+						placeholder: 'https://example.com/myapp.war',
+					},
+				},
+				{
 									items: [
 										{
 											text: lan.site.ssl_close,

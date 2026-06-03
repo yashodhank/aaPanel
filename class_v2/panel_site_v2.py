@@ -21,6 +21,7 @@ except:
     os.system("btpip install pyOpenSSL -I")
     import OpenSSL
 import base64
+import shlex
 
 try:
     from BTPanel import session
@@ -30,6 +31,17 @@ from panel_redirect_v2 import panelRedirect
 import site_dir_auth_v2 as site_dir_auth
 from public.validate import Param
 public.sys_path_append("/class_v2")
+
+_tomcat_support = False
+try:
+    sys.path.insert(0, os.path.join(public.get_panel_path(), "class_v2"))
+    from capability_registry import CapabilityRegistry
+    from adapters.tomcat_adapter import TomcatRuntimeAdapter
+    from adapters.pgsql_adapter import PgsqlProjectAdapter
+    from adapters.deployment_adapter import DeploymentAdapter
+    _tomcat_support = True
+except ImportError:
+    public.WriteLog("panelSite", "Tomcat/Java/PostgreSQL adapters not available - Java runtime support disabled")
 
 
 class panelSite(panelRedirect):
@@ -919,6 +931,10 @@ include /www/server/panel/vhost/openlitespeed/proxy/BTSITENAME/*.conf
         if not hasattr(get, 'type_id'): get.type_id = 0
 
         if not hasattr(get, 'project_type'): get.project_type = "PHP"
+
+        runtime = get.get('runtime', 'php')
+        if _tomcat_support and runtime == 'tomcat':
+            return self._create_tomcat_site(get)
         
         self.check_default()
 
@@ -1280,6 +1296,355 @@ include /www/server/panel/vhost/openlitespeed/proxy/BTSITENAME/*.conf
         except Exception as e:
             public.print_log(f"AddSite Error : {e}")
             return data
+
+    def _create_tomcat_site(self, get):
+        """
+        Create a Tomcat/Java project site via the runtime-aware adapter pattern.
+        Routes to TomcatRuntimeAdapter for project creation, PgsqlProjectAdapter
+        for optional database provisioning, and DeploymentAdapter for subsequent
+        WAR deployment.
+
+        Expected keys on get args:
+            webname     (str)  JSON with domain/domainlist
+            path        (str)  Project root directory
+            port        (int)  Application listen port
+            ps          (str)  Project description / note
+            type_id     (int)  Site type ID for DB storage
+
+            tomcat_version      (str)  e.g. "9", "10.1"
+            java_version        (str)  e.g. "17", "21"
+            deployment_mode     (str)  "shared" | "isolated"
+            exposure_mode       (str)  "root_domain" | "subdirectory"
+            database_engine     (str)  "none" | "mysql" | "pgsql"
+            database_name       (str)  Required if database_engine == "pgsql"
+            database_username   (str)  Auto-generated if empty
+            database_password   (str)  Auto-generated if empty
+            deployment_pref     (str)  "deploy_later" | "upload_war" | "server_path" | "from_url"
+
+        Returns: public.return_message compatible dict via public.success_v2 / public.fail_v2
+        """
+        import json as _json
+
+        # --- Parse domain info ---
+        try:
+            site_menu = _json.loads(get.webname)
+        except Exception:
+            return public.fail_v2("The format of the webname parameter is incorrect, it should be a parseable JSON string")
+
+        domain = site_menu.get('domain', '').strip().split(':')[0]
+        project_name = self.ToPunycode(domain).strip().lower()
+
+        project_path = self.ToPunycodePath(self.GetPath(get.path.replace(' ', ''))).strip()
+        port = get.get('port', '80')
+
+        # Validate port
+        if port and not public.checkPort(str(port)):
+            return public.fail_v2('The port is occupied or the port range is incorrect! It should be between 100 and 65535')
+
+        # Duplicate check
+        if public.M('sites').where("name=?", (project_name,)).count():
+            return public.fail_v2('The site you tried to add already exists!')
+
+        opid = public.M('domain').where("name=?", (project_name,)).getField('pid')
+        if opid:
+            if public.M('sites').where('id=?', (opid,)).count():
+                return public.fail_v2('The domain you tried to add already exists!')
+            public.M('domain').where('pid=?', (opid,)).delete()
+
+        # --- Extract Tomcat fields ---
+        tomcat_version = get.get('tomcat_version', '')
+        java_version = get.get('java_version', '')
+        deployment_mode = get.get('deployment_mode', 'shared')
+        exposure_mode = get.get('exposure_mode', 'root_domain')
+        database_engine = get.get('database_engine', 'none')
+        deployment_pref = get.get('deployment_pref', 'deploy_later')
+
+        # --- Validate via CapabilityRegistry ---
+        valid, err_msg = CapabilityRegistry.validate_runtime_combo(
+            runtime='tomcat',
+            tomcat_version=tomcat_version,
+            java_version=java_version,
+            database_engine=database_engine if database_engine != 'none' else None,
+        )
+        if not valid:
+            return public.fail_v2(err_msg)
+
+        # Ensure project path exists
+        if not os.path.exists(project_path):
+            try:
+                os.makedirs(project_path)
+            except Exception as ex:
+                return public.fail_v2('Failed to create project root directory: {}'.format(str(ex)))
+            public.ExecShell('chmod -R 755 ' + shlex.quote(project_path))
+
+        # --- Build the project contract for TomcatRuntimeAdapter ---
+        project_contract = {
+            'name': project_name,
+            'domain': project_name,
+            'path': project_path,
+            'deployment_mode': deployment_mode,
+            'tomcat_version': tomcat_version,
+            'java_version': java_version,
+            'port': int(port) if port else 8080,
+            'description': get.get('ps', project_name),
+            'database_engine': database_engine if database_engine != 'none' else 'none',
+            'exposure_mode': exposure_mode,
+        }
+
+        # --- Create the project via Tomcat adapter ---
+        try:
+            adapter = TomcatRuntimeAdapter()
+            result = adapter.create_project(project_contract)
+        except Exception as ex:
+            return public.fail_v2('Tomcat project creation failed: {}'.format(str(ex)))
+
+        if not result.get('status'):
+            return public.fail_v2(result.get('msg', 'Tomcat project creation failed.'))
+
+        project_details = result.get('data', {})
+        project_id = project_details.get('name', project_name)
+
+        # --- Record the site in the database ---
+        ps = public.xssencode2(get.get('ps', project_name))
+        type_id = get.get('type_id', 0)
+        pid = None
+        try:
+            pid = public.M('sites').add(
+                'name,path,status,ps,type_id,addtime,project_type',
+                (project_name, project_path, '1', ps, type_id, public.getDate(), 'Java')
+            )
+        except Exception as ex:
+            return public.fail_v2('Database insert failed: {}'.format(str(ex)))
+
+        cleanup_needed = False
+        try:
+            # Register domain
+            try:
+                public.M('domain').add('pid,name,port,addtime', (pid, project_name, str(port), public.getDate()))
+            except Exception:
+                pass
+
+            # --- Optional database provisioning ---
+            db_info = {}
+            if database_engine == 'pgsql':
+                try:
+                    pgsql_adapter = PgsqlProjectAdapter()
+                    db_spec = {
+                        'database_name': get.get('tomcat_db_name', project_name.replace('.', '_') + '_db'),
+                        'username': get.get('tomcat_db_user', ''),
+                        'password': get.get('tomcat_db_pass', ''),
+                        'listen_ip': get.get('database_listen_ip', '127.0.0.1/32'),
+                    }
+                    db_result = pgsql_adapter.provision_database(str(pid), db_spec)
+                    if db_result.get('status'):
+                        db_info = {
+                            'databaseProvisioned': True,
+                            'databaseName': db_result['data'].get('database_name'),
+                            'databaseUser': db_result['data'].get('username'),
+                            'databasePass': db_result['data'].get('password'),
+                        }
+                    else:
+                        db_info = {
+                            'databaseProvisioned': False,
+                            'databaseError': db_result.get('msg', 'Unknown error'),
+                        }
+                        public.WriteLog('TomcatSite', 'Database provisioning failed for project {}: {}'.format(
+                            project_name, db_result.get('msg', '')
+                        ))
+                except Exception as ex:
+                    db_info = {'databaseProvisioned': False, 'databaseError': str(ex)}
+
+            # --- Firewall port ---
+            if port and str(port) != '80':
+                try:
+                    import firewalls
+                    fw_get = public.dict_obj()
+                    fw_get.port = str(port)
+                    fw_get.ps = project_name
+                    firewalls.firewalls().AddAcceptPort(fw_get)
+                except Exception:
+                    pass
+
+        except Exception as rollback_ex:
+            # Partial creation rollback: clean up orphaned project
+            try:
+                adapter.delete_project(project_id)
+            except Exception:
+                pass
+            if pid is not None:
+                try:
+                    public.M('sites').where('id=?', (pid,)).delete()
+                    public.M('domain').where('pid=?', (pid,)).delete()
+                except Exception:
+                    pass
+            return public.fail_v2('Project creation failed - rolled back: {}'.format(str(rollback_ex)))
+
+        # --- Build response ---
+        data = {
+            'siteStatus': True,
+            'siteId': pid,
+            'runtime': 'tomcat',
+            'projectName': project_name,
+            'projectPath': project_path,
+            'deploymentMode': deployment_mode,
+            'tomcatVersion': tomcat_version,
+            'javaVersion': java_version,
+            'databaseInfo': db_info,
+            'deploymentPref': deployment_pref,
+            'nextSteps': [],
+        }
+
+        if deployment_pref == 'deploy_later':
+            data['nextSteps'].append({
+                'label': 'Deploy WAR',
+                'action': 'deploy_war',
+                'params': {'project_id': pid},
+            })
+        if db_info.get('databaseProvisioned'):
+            data['nextSteps'].append({
+                'label': 'View Database Credentials',
+                'action': 'show_credentials',
+                'params': {'project_id': pid, 'database_name': db_info.get('databaseName')},
+            })
+        data['nextSteps'].append({
+            'label': 'Manage Project',
+            'action': 'project_management',
+            'params': {'project_id': pid},
+        })
+
+        public.set_module_logs('Tomcat', 'create', 1)
+        public.write_log_gettext('Site manager', 'Successfully added Tomcat project [{}]!', (project_name,))
+
+        return public.success_v2(data)
+
+    def deploy_war(self, get):
+        """
+        Deploy a WAR artifact to an existing Tomcat project.
+
+        Expected keys on get args:
+            project_id      (int)   Site ID from database
+            source_type     (str)   "browser_upload" | "server_path" | "url" | "exploded_dir"
+            source_config   (dict)  Depends on source_type:
+                browser_upload: {"file_data": <bytes>, "filename": "app.war"}
+                server_path:    {"path": "/tmp/app.war"}
+                url:            {"url": "https://example.com/app.war"}
+                exploded_dir:   {"path": "/tmp/exploded_app"}
+            activation_mode (str)   "shared" | "isolated" (defaults to project's deployment_mode)
+            health_check_path (str) Optional, default "/"
+
+        Returns: public.return_message compatible dict
+        """
+        project_id = get.get('project_id')
+        if not project_id:
+            return public.fail_v2('Missing required parameter: project_id')
+
+        source_type = get.get('source_type', '')
+        if not source_type:
+            return public.fail_v2('Missing required parameter: source_type')
+
+        # Fetch project from database
+        site = public.M('sites').where('id=?', (int(project_id),)).find()
+        if not site:
+            return public.fail_v2('Project not found: {}'.format(project_id))
+
+        if site.get('project_type') != 'Java':
+            return public.fail_v2('WAR deployment is only supported for Java projects.')
+
+        project_name = site.get('name', '')
+        project_path = site.get('path', '')
+        project_config_str = site.get('project_config', '{}')
+
+        project_config = {}
+        try:
+            if isinstance(project_config_str, str):
+                project_config = json.loads(project_config_str) if project_config_str else {}
+            elif isinstance(project_config_str, dict):
+                project_config = project_config_str
+        except Exception:
+            project_config = {}
+
+        if not project_path:
+            return public.fail_v2('Project path is empty for project: {}'.format(project_name))
+
+        # Resolve activation mode
+        activation_mode = get.get('activation_mode', project_config.get('deployment_mode', 'shared'))
+        if activation_mode not in ('shared', 'isolated'):
+            return public.fail_v2("Unsupported activation_mode '{}'. Use 'shared' or 'isolated'.".format(activation_mode))
+
+        # Prepare source_config from individual args if not provided as a dict
+        source_config = get.get('source_config', {})
+        if not source_config or not isinstance(source_config, dict):
+            if source_type == 'server_path':
+                source_config = {'path': get.get('server_path', '')}
+            elif source_type == 'url':
+                source_config = {'url': get.get('artifact_url', '')}
+            elif source_type == 'exploded_dir':
+                source_config = {'path': get.get('exploded_dir_path', '')}
+            elif source_type == 'browser_upload':
+                source_config = {
+                    'file_data': get.get('file_data'),
+                    'filename': get.get('filename', 'uploaded.war'),
+                }
+
+        # Validate file size for upload (max 200MB)
+        if source_type == 'browser_upload':
+            file_data = source_config.get('file_data')
+            if file_data and isinstance(file_data, bytes) and len(file_data) > 200 * 1024 * 1024:
+                return public.fail_v2('Upload exceeds maximum size of 200MB.')
+
+        # Intake artifact
+        try:
+            deploy_adapter = DeploymentAdapter()
+            intake_result = deploy_adapter.intake_artifact(
+                source_type=source_type,
+                source_config=source_config,
+                project_path=project_path,
+            )
+        except Exception as ex:
+            return public.fail_v2('Artifact intake failed: {}'.format(str(ex)))
+
+        if not intake_result.get('status'):
+            return public.fail_v2(intake_result.get('msg', 'Artifact intake failed.'))
+
+        release_id = intake_result.get('data', {}).get('release_id', '')
+
+        # Merge project_config for activation
+        activation_config = {
+            'project_name': project_name,
+            'path': project_path,
+            'deployment_mode': activation_mode,
+            'java_type': project_config.get('java_type', 'duli'),
+            'tomcat_version': project_config.get('tomcat_version', '9'),
+            'port': project_config.get('port', 8080),
+            'domains': [project_name],
+            'health_check_path': get.get('health_check_path', '/'),
+        }
+        activation_config.update(project_config)
+
+        # Activate the release
+        try:
+            activate_result = deploy_adapter.activate_release(
+                project_id=str(project_id),
+                release_id=release_id,
+                mode=activation_mode,
+                project_config=activation_config,
+            )
+        except Exception as ex:
+            return public.fail_v2('Release activation failed: {}'.format(str(ex)))
+
+        if not activate_result.get('status'):
+            return public.fail_v2(activate_result.get('msg', 'Release activation failed.'))
+
+        data = {
+            'releaseId': release_id,
+            'activationMode': activation_mode,
+            'healthStatus': activate_result.get('data', {}).get('health_status', 'unknown'),
+            'projectId': str(project_id),
+            'projectName': project_name,
+        }
+
+        public.write_log_gettext('Site manager', 'Successfully deployed WAR to project [{}]!', (project_name,))
+        return public.success_v2(data)
 
     # WP添加站点
     def add_sites(self, get, app=None, multiple=None):

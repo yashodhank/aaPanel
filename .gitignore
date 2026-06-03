@@ -3,3 +3,4 @@
 idea/*
 .vscode/*
 .worktrees/
+__pycache__/

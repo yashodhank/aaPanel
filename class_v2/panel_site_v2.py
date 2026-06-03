@@ -1413,6 +1413,18 @@ include /www/server/panel/vhost/openlitespeed/proxy/BTSITENAME/*.conf
                 'name,path,status,ps,type_id,addtime,project_type',
                 (project_name, project_path, '1', ps, type_id, public.getDate(), 'Java')
             )
+            # Persist runtime and deployment config for diagnostics and operational use
+            stored_config = {
+                "tomcat_version": tomcat_version,
+                "java_version": java_version,
+                "deployment_mode": deployment_mode,
+                "port": int(port) if port else 8080,
+                "exposure_mode": exposure_mode,
+                "database_engine": database_engine,
+            }
+            public.M('sites').where('id=?', (pid,)).update(
+                {'project_config': _json.dumps(stored_config)}
+            )
         except Exception as ex:
             duplicate_msg = str(ex).lower()
             if 'duplicate' in duplicate_msg or 'unique' in duplicate_msg:

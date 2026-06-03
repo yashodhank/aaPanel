@@ -8,6 +8,7 @@
 import os
 import re
 import random
+import shlex
 import string
 import sys
 from typing import Dict, List, Optional, Tuple
@@ -164,10 +165,10 @@ class PgsqlProjectAdapter:
         if install:
             pg_isready_bin = os.path.join(install["bin_dir"], "pg_isready")
             if os.path.isfile(pg_isready_bin):
-                out = public.ExecShell("su - postgres -c '" + pg_isready_bin + " -q 2>/dev/null' && echo OK || echo FAIL")
+                out = public.ExecShell("su - postgres -c '" + shlex.quote(pg_isready_bin) + " -q 2>/dev/null' && echo OK || echo FAIL")
                 if out and len(out) > 0 and "OK" in out[0]:
                     return True
-                out = public.ExecShell(pg_isready_bin + " -q 2>/dev/null && echo OK || echo FAIL")
+                out = public.ExecShell(shlex.quote(pg_isready_bin) + " -q 2>/dev/null && echo OK || echo FAIL")
                 if out and len(out) > 0 and "OK" in out[0]:
                     return True
 

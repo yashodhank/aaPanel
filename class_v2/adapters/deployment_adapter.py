@@ -15,6 +15,7 @@ import sys
 import time
 import hashlib
 import json
+import shlex
 import shutil
 import urllib.request
 import urllib.error
@@ -305,7 +306,7 @@ class DeploymentAdapter:
     def _extract_war(self, war_path: str, dest_dir: str, remove_war: bool = False) -> None:
         extract_dir = os.path.join(dest_dir, "extracted")
         os.makedirs(extract_dir, exist_ok=True)
-        result = public.ExecShell("unzip -o {} -d {}".format(war_path, extract_dir))
+        result = public.ExecShell("unzip -o {} -d {}".format(shlex.quote(war_path), shlex.quote(extract_dir)))
         if result[1] and ("error" in result[1].lower() or "cannot find" in result[1].lower()):
             raise HintException("Failed to extract WAR file: {}".format(result[1]))
         if remove_war:
@@ -314,7 +315,7 @@ class DeploymentAdapter:
     def _package_exploded_dir(self, dir_path: str, dest_dir: str) -> str:
         war_path = os.path.join(dest_dir, "app.war")
         result = public.ExecShell(
-            "cd {} && jar cf {} *".format(dir_path, war_path)
+            "cd {} && jar cf {} *".format(shlex.quote(dir_path), shlex.quote(war_path))
         )
         if result[1] and "error" in result[1].lower():
             raise HintException("Failed to package exploded directory as WAR: {}".format(result[1]))
@@ -480,7 +481,7 @@ class DeploymentAdapter:
             self._update_tomcat_port(alternate_project_dir, alternate_port)
 
             public.ExecShell(
-                "{}/bin/startup.sh".format(alternate_project_dir)
+                "{}/bin/startup.sh".format(shlex.quote(alternate_project_dir))
             )
 
             self._wait_for_port(alternate_port, timeout=15)
@@ -509,7 +510,7 @@ class DeploymentAdapter:
             )
             self._update_primary_tomcat_port(current_project_web, alternate_port)
 
-            health_status = "healthy" if health_result2.get("data", {}).get("code") in (200, 301, 302) else "unknown"
+            health_status = "healthy" if health_result.get("data", {}).get("code") in (200, 301, 302) else "unknown"
 
             return {"status": True, "data": {"release_id": release_id, "health_status": health_status}}
 
@@ -518,6 +519,10 @@ class DeploymentAdapter:
             raise
 
     def _find_alternate_port(self, current_port: int) -> int:
+        for offset in (1, -1, 2, -2, 3, -3, 4, -4, 5, -5):
+            alt = current_port + offset
+            if 1024 <= alt <= 65535 and public.checkPort(str(alt)):
+                return alt
         alt = current_port + 1
         if alt > 65535:
             alt = current_port - 1
@@ -577,7 +582,7 @@ class DeploymentAdapter:
     def _stop_isolated_instance(self, tomcat_home: str) -> None:
         shutdown_script = os.path.join(tomcat_home, "bin", "shutdown.sh")
         if os.path.exists(shutdown_script):
-            public.ExecShell("{} 2>/dev/null".format(shutdown_script))
+            public.ExecShell("{} 2>/dev/null".format(shlex.quote(shutdown_script)))
             time.sleep(2)
 
     def _reload_tomcat_context(self, project_name: str) -> None:

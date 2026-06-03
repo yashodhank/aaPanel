@@ -19,12 +19,14 @@ $('#cutMode .tabs-item').on('click', function () {
 			product_recommend.init(function () {
 				site.php_table_view();
 			});
-			// site.get_types();
+			break;
+		case 'java':
+			$('#bt_java_table').empty();
+			site.java_project_view();
 			break;
 		case 'nodejs':
 			$('#bt_node_table').empty();
 			$.get('/plugin?action=getConfigHtml', { name: 'nodejs' }, function (res) {
-				// if(typeof res !== 'string') $('.site_table_view .mask_layer').removeClass('hide').find('.prompt_description').html('Node version manager is not installed，<a href="javascript:;" class="btlink" onclick="bt.soft.install(\'nodejs\')">Click install</a>');
 				if (typeof res !== 'string') {
 					$('#bt_node_table+.mask_layer')
 						.removeClass('hide')
@@ -41,6 +43,7 @@ $('#cutMode .tabs-item').on('click', function () {
 });
 
 var site_table;
+var java_table;
 var node_table;
 var countryList = [];
 var site = {
@@ -1848,6 +1851,208 @@ var site = {
 			],
 		});
 	},
+	java_project_view: function () {
+		java_table = bt_tools.table({
+			el: '#bt_java_table',
+			url: '/data?action=getData',
+			cookiePrefix: 'java_table',
+			param: { table: 'sites', project_type: 'Java' },
+			minWidth: '1000px',
+			autoHeight: true,
+			default: 'No Java projects found',
+			column: [
+				{ type: 'checkbox', class: '', width: 20 },
+				{
+					fid: 'name',
+					title: lan.site.site_name,
+					sort: true,
+					sortValue: 'asc',
+					class: 'site_name',
+					type: 'link',
+					width: 130,
+					isDisabled: true,
+					event: function (row, index, ev) {
+						site.web_edit(row, true);
+					},
+					template: function (row, index) {
+						return (
+							'<div style="display:inline-flex;align-items:center;position:relative">\
+							<a class="btlink web_name" data-type="' +
+							row.name +
+							'" data-name="' +
+							row.name +
+							'" data-id="' +
+							row.id +
+							'" href="javascript:;">' +
+							(row.rname || row.name) +
+							'</a>\
+							</div>'
+						);
+					},
+				},
+				{
+					fid: 'status',
+					title: lan.site.status,
+					sort: true,
+					width: 85,
+					config: {
+						icon: true,
+						list: [
+							['1', lan.site.running_text, 'bt_success', 'glyphicon-play'],
+							['0', lan.site.stopped, 'bt_danger', 'glyphicon-pause'],
+						],
+					},
+					type: 'status',
+					event: function (row, index, ev, key, that) {
+						bt.site[parseInt(row.status) ? 'stop' : 'start'](row.id, row.name, function (res) {
+							if (res.status) that.$modify_row_data({ status: parseInt(row.status) ? '0' : '1' });
+						});
+					},
+				},
+				{
+					fid: 'runtime_type',
+					title: 'Runtime',
+					width: 120,
+					type: 'text',
+					template: function (row, index) {
+						var project_config = row.project_config || {};
+						if (typeof project_config === 'string') {
+							try { project_config = JSON.parse(project_config); } catch (e) { project_config = {}; }
+						}
+						var tcVer = project_config.tomcat_version || '';
+						var jdkVer = project_config.java_version || '';
+						var verInfo = '';
+						if (tcVer) verInfo += 'TC ' + tcVer;
+						if (jdkVer) verInfo += (verInfo ? ' / ' : '') + 'JDK ' + jdkVer;
+						return (
+							'<span class="bt_success" style="display:inline-block;padding:2px 8px;border-radius:3px;font-size:12px;background:#e8f5e9;color:#2e7d32;margin-right:4px;">Java</span>' +
+							(verInfo ? '<span style="font-size:11px;color:#888;" title="' + verInfo + '">' + verInfo + '</span>' : '')
+						);
+					},
+				},
+				{
+					fid: 'path',
+					title: lan.site.root_dir,
+					tips: 'Open path',
+					type: 'link',
+					event: function (row, index, ev) {
+						openPath(row.path);
+					},
+					template: function (row, index) {
+						return '<div style="display: flex;"><a class="btlink size_ellipsis" style="flex: 1; width: 0;" href="javascript:;" title="' + row.path + '">' + row.path + '</a></div>';
+					},
+				},
+				{
+					fid: 'edate',
+					title: lan.site.endtime,
+					width: 115,
+					class: 'set_site_edate',
+					sort: true,
+					type: 'link',
+					template: function (row, index) {
+						var _endtime = row.edate || row.endtime;
+						if (_endtime === '0000-00-00') {
+							return lan.site.web_end_time;
+						} else {
+							if (new Date(_endtime).getTime() < new Date().getTime()) {
+								return '<a href="javascript:;" class="bt_danger">' + _endtime + '</a>';
+							} else {
+								return _endtime;
+							}
+						}
+					},
+				},
+				{
+					fid: 'ps',
+					title: lan.site.note,
+					type: 'input',
+					blur: function (row, index, ev) {
+						if (row.ps == ev.target.value) return false;
+						bt.pub.set_data_ps({ id: row.id, table: 'sites', ps: ev.target.value }, function (res) {
+							if (!res.status) layer.msg(res.msg, { status: 2 });
+						});
+					},
+					keyup: function (row, index, ev) {
+						if (ev.keyCode === 13) {
+							$(this).blur();
+						}
+					},
+				},
+				{
+					title: lan.site.operate,
+					type: 'group',
+					width: 170,
+					align: 'right',
+					group: [
+						{
+							title: 'Diagnose',
+							event: function (row, index, ev, key, that) {
+								site.diagnose_java(row.id, row.name);
+							},
+						},
+						{
+							title: lan.site.set,
+							event: function (row, index, ev, key, that) {
+								site.web_edit(row, true);
+							},
+						},
+						{
+							title: 'Del',
+							event: function (row, index, ev, key, that) {
+								site.del_site(row.id, row.name, function () {
+									that.$refresh_table_list(true);
+								});
+							},
+						},
+					],
+				},
+			],
+			sortParam: function (data) {
+				return { order: data.name + ' ' + data.sort };
+			},
+			tootls: [
+				{
+					type: 'search',
+					positon: ['right', 'top'],
+					placeholder: 'Domain or Remarks',
+					searchParam: 'search',
+					value: '',
+				},
+				{
+					type: 'batch',
+					positon: ['left', 'bottom'],
+					placeholder: 'Select batch operation',
+					buttonValue: 'Execute',
+					disabledSelectValue: 'Select the website to execute!',
+					selectList: [
+						{
+							group: [
+								{ title: lan.site.enable_website, param: { status: 1 } },
+								{ title: 'Disable website', param: { status: 0 } },
+							],
+							url: '/site?action=set_site_status_multiple',
+							confirmVerify: false,
+							paramName: 'sites_id',
+							paramId: 'id',
+							theadName: 'Name',
+							refresh: true,
+						},
+					],
+				},
+				{
+					type: 'page',
+					positon: ['right', 'bottom'],
+					pageParam: 'p',
+					page: 1,
+					numberParam: 'limit',
+					number: 20,
+					numberList: [10, 20, 50, 100, 200],
+					numberStatus: true,
+					jump: true,
+				},
+			],
+		});
+	},
 	php_table_view: function () {
 		var hoverInfo = {};
 		$('#bt_site_table').empty();
@@ -1971,6 +2176,10 @@ var site = {
 			default: 'Site list is empty', // 数据为空时的默认提示
 			beforeRequest: function (param) {
 				param.type = bt.get_cookie('site_type') || -1;
+				var runtimeFilter = bt.get_cookie('site_runtime_filter') || '';
+				if (runtimeFilter) {
+					param.project_type = runtimeFilter;
+				}
 				return param;
 			},
 			column: [
@@ -2077,6 +2286,22 @@ var site = {
 					},
 					event: function (row, index) {
 						site.backup_site_view({ id: row.id, name: row.name }, site_table);
+					},
+				},
+				{
+					fid: 'runtime_type',
+					title: 'Runtime',
+					width: 75,
+					type: 'text',
+					template: function (row, index) {
+						var rt = row.runtime_type || 'PHP';
+						if (rt === 'Java') {
+							return '<span style="display:inline-block;padding:1px 6px;border-radius:3px;font-size:11px;background:#e8f5e9;color:#2e7d32;">Java</span>';
+						}
+						if (rt === 'WP' || rt === 'WP2') {
+							return '<span style="display:inline-block;padding:1px 6px;border-radius:3px;font-size:11px;background:#e3f2fd;color:#1565c0;">WP</span>';
+						}
+						return '<span style="display:inline-block;padding:1px 6px;border-radius:3px;font-size:11px;background:#f5f5f5;color:#888;">PHP</span>';
 					},
 				},
 				{
@@ -4299,6 +4524,69 @@ var site = {
 			},
 		});
 	},
+	diagnose_java: function (siteId, siteName) {
+		var loading = bt.load('Running diagnostics...');
+		var that = this;
+		bt_tools.send({
+			url: '/site?action=diagnose_java_runtime',
+			data: { project_id: siteId }
+		}, function (rdata) {
+			loading.close();
+			if (!rdata.status) {
+				bt.msg({ status: false, msg: rdata.msg || 'Diagnostics failed' });
+				return;
+			}
+			that._show_diagnostics_modal(rdata, siteName);
+		});
+	},
+
+	_show_diagnostics_modal: function (rdata, siteName) {
+		var diag = rdata;
+		var summary = diag.summary || {};
+		var summaryColor = summary.status === 'healthy' ? '#20a53a' : summary.status === 'degraded' ? '#f39c12' : '#ed4014';
+
+		var summaryHtml = '<div style="padding:15px;margin-bottom:15px;background:#f7f8fa;border-radius:6px;">' +
+			'<div style="display:flex;align-items:center;margin-bottom:10px;">' +
+			'<span style="font-size:16px;font-weight:600;">' + (diag.project_name || siteName) + '</span>' +
+			'<span style="margin-left:12px;padding:2px 10px;border-radius:12px;font-size:12px;color:#fff;background:' + summaryColor + ';">' + (summary.status || 'unknown').toUpperCase() + '</span>' +
+			'</div>' +
+			'<div style="display:flex;gap:20px;font-size:12px;color:#666;">' +
+			'<span><b style="color:#20a53a;">' + (summary.passed || 0) + '</b> Passed</span>' +
+			'<span><b style="color:#f39c12;">' + (summary.warnings || 0) + '</b> Warnings</span>' +
+			'<span><b style="color:#ed4014;">' + (summary.failures || 0) + '</b> Failed</span>' +
+			'</div></div>';
+
+		var checksHtml = '<div style="margin-bottom:15px;"><h4 style="margin-bottom:8px;">Checks</h4><div class="divtable"><table class="table table-hover"><tbody>';
+		(diag.checks || []).forEach(function (c) {
+			var icon = c.status === 'pass' ? '<span style="color:#20a53a;" class="glyphicon glyphicon-ok-circle"></span>' :
+				c.status === 'warn' ? '<span style="color:#f39c12;" class="glyphicon glyphicon-warning-sign"></span>' :
+				'<span style="color:#ed4014;" class="glyphicon glyphicon-remove-circle"></span>';
+			checksHtml += '<tr><td width="30">' + icon + '</td><td width="160">' + c.name + '</td><td>' + c.detail + '</td></tr>';
+		});
+		checksHtml += '</tbody></table></div></div>';
+
+		var issuesHtml = '';
+		if ((diag.issues || []).length > 0) {
+			issuesHtml = '<div style="margin-bottom:15px;"><h4 style="margin-bottom:8px;color:#ed4014;">Issues Found</h4><ul style="padding-left:20px;">';
+			diag.issues.forEach(function (i) { issuesHtml += '<li style="margin-bottom:4px;">' + i + '</li>'; });
+			issuesHtml += '</ul></div>';
+		}
+
+		var suggestionsHtml = '';
+		if ((diag.suggestions || []).length > 0) {
+			suggestionsHtml = '<div><h4 style="margin-bottom:8px;color:#2d8cf0;">Suggestions</h4><ul style="padding-left:20px;">';
+			diag.suggestions.forEach(function (s) { suggestionsHtml += '<li style="margin-bottom:4px;">' + s + '</li>'; });
+			suggestionsHtml += '</ul></div>';
+		}
+
+		bt_tools.open({
+			title: 'Diagnostics - ' + (siteName || diag.project_name || ''),
+			area: ['700px', '520px'],
+			btn: ['Close'],
+			content: '<div style="padding:20px;max-height:440px;overflow-y:auto;">' + summaryHtml + checksHtml + issuesHtml + suggestionsHtml + '</div>'
+		});
+	},
+
 	deploy_war: function (siteId) {
 		var dform = bt_tools.form({
 			form: [

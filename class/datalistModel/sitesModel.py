@@ -71,7 +71,12 @@ class main(dataBase):
             val['backup_count'] = public.M('backup').where("pid=? and type=?", (val['id'],'0')).count()
             val['domain'] = domain_obj.where("pid=?", (val['id'],)).count()
             val['ssl'] = self.get_site_ssl_info(val['name'])
-            val['php_version'],val['php_version_status'] = self.get_php_version(val['name'])
+            if val.get('project_type') in ('PHP', 'WP2') or 'php' in str(val.get('project_type', '')).lower():
+                val['php_version'],val['php_version_status'] = self.get_php_version(val['name'])
+            else:
+                val['php_version'] = '-'
+                val['php_version_status'] = True
+            val['runtime_type'] = val.get('project_type', 'PHP')
             if 'project_config' in  val.keys() and 'type' in  val["project_config"].keys() and 'PHPMOD' == val["project_config"]["type"]:
                 if "php_version" in val['project_config'].keys() and len(val['project_config']['php_version']) > 1:
                     val['php_version'] = val['project_config']['php_version'][0] + '.' + val['project_config']['php_version'][1]
@@ -408,11 +413,27 @@ class main(dataBase):
         wheres = []
         get = self._get_site_args(get)
 
-        wheres.append(("(project_type = ?)", (get.project_type)))
-        if get.project_type == 'PHP':
+        if get.project_type == 'all':
             if not get.type in ['-1', -1]:
                 if int(get.type) == -2:
                     wheres.append("(status = '0')")
                 else:
                     wheres.append("(type_id = {})".format(get.type))
+        else:
+            wheres.append(("(project_type = ?)", (get.project_type)))
+            if get.project_type in ('PHP', 'Java'):
+                if not get.type in ['-1', -1]:
+                    if int(get.type) == -2:
+                        wheres.append("(status = '0')")
+                    else:
+                        wheres.append("(type_id = {})".format(get.type))
         return wheres
+
+    def get_runtime_counts(self, get=None):
+        rows = public.M('sites').field('project_type,count(*) as cnt').group('project_type').select()
+        counts = {}
+        if rows:
+            for row in rows:
+                pt = row.get('project_type', 'PHP')
+                counts[pt] = row.get('cnt', 0) if isinstance(row, dict) else row[1]
+        return counts

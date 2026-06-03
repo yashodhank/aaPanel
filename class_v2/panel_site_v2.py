@@ -1654,6 +1654,123 @@ include /www/server/panel/vhost/openlitespeed/proxy/BTSITENAME/*.conf
         public.write_log_gettext('Site manager', 'Successfully deployed WAR to project [{}]!', (project_name,))
         return public.success_v2(data)
 
+    def diagnose_java_runtime(self, get):
+        """
+        Run diagnostics on a Java/Tomcat project to check runtime health,
+        configuration validity, and provide troubleshooting information.
+        
+        Expected get args:
+            project_id (int): Site ID from database
+            
+        Returns: public.success_v2 / public.fail_v2 with detailed diagnostic info
+        """
+        project_id = get.get('project_id')
+        if not project_id:
+            return public.fail_v2('Missing required parameter: project_id')
+
+        site = public.M('sites').where('id=?', (int(project_id),)).find()
+        if not site:
+            return public.fail_v2('Project not found: {}'.format(project_id))
+
+        if site.get('project_type') != 'Java':
+            return public.fail_v2('Diagnostics only supported for Java projects.')
+
+        project_name = site.get('name', '')
+        project_path = site.get('path', '')
+        project_config_str = site.get('project_config', '{}')
+
+        import json as _json
+        project_config = {}
+        try:
+            if isinstance(project_config_str, str):
+                project_config = _json.loads(project_config_str) if project_config_str else {}
+            elif isinstance(project_config_str, dict):
+                project_config = project_config_str
+        except Exception:
+            project_config = {}
+
+        diagnostics = {
+            'project_name': project_name,
+            'project_path': project_path,
+            'project_status': site.get('status', '1'),
+            'timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
+            'checks': [],
+            'issues': [],
+            'suggestions': [],
+        }
+
+        # Check 1: Project path exists
+        if os.path.exists(project_path):
+            diagnostics['checks'].append({'name': 'Project directory', 'status': 'pass', 'detail': project_path})
+        else:
+            diagnostics['checks'].append({'name': 'Project directory', 'status': 'fail', 'detail': 'Path not found: {}'.format(project_path)})
+            diagnostics['issues'].append('Project directory is missing. The project may need to be recreated.')
+
+        # Check 2: Java installation
+        java_version = project_config.get('java_version', '')
+        java_path = '/www/server/java'
+        if os.path.isdir(java_path):
+            installed_javas = [d for d in os.listdir(java_path) if os.path.isdir(os.path.join(java_path, d))]
+            if installed_javas:
+                diagnostics['checks'].append({'name': 'Java installation', 'status': 'pass', 'detail': '{} JDK(s) found: {}'.format(len(installed_javas), ', '.join(sorted(installed_javas)))})
+            else:
+                diagnostics['checks'].append({'name': 'Java installation', 'status': 'fail', 'detail': 'No JDK installations found in {}'.format(java_path)})
+                diagnostics['issues'].append('No Java JDK installed. Install a JDK from the Java management page.')
+                diagnostics['suggestions'].append('Recommended: Install Java {} for this project'.format(java_version or '17'))
+        else:
+            diagnostics['checks'].append({'name': 'Java installation', 'status': 'fail', 'detail': 'Java directory not found: {}'.format(java_path)})
+            diagnostics['issues'].append('Java is not installed on this server.')
+
+        # Check 3: Tomcat service status
+        tomcat_version = project_config.get('tomcat_version', '9')
+        tomcat_init = '/etc/init.d/bttomcat{}'.format(tomcat_version.split('.')[0])
+        if os.path.exists(tomcat_init):
+            result = public.ExecShell(tomcat_init + ' status 2>/dev/null')
+            running = result and len(result) >= 2 and 'running' in str(result[1]).lower()
+            diagnostics['checks'].append({
+                'name': 'Tomcat {} service'.format(tomcat_version),
+                'status': 'pass' if running else 'warn',
+                'detail': 'Running' if running else 'Not running'
+            })
+            if not running:
+                diagnostics['suggestions'].append('Start Tomcat: {} start'.format(tomcat_init))
+        else:
+            diagnostics['checks'].append({
+                'name': 'Tomcat service',
+                'status': 'warn',
+                'detail': 'Tomcat {} init script not found'.format(tomcat_version)
+            })
+
+        # Check 4: Port availability
+        port = str(project_config.get('port', '8080'))
+        port_open = public.checkPort(port)
+        diagnostics['checks'].append({
+            'name': 'Port {} availability'.format(port),
+            'status': 'pass' if port_open else 'warn',
+            'detail': 'Available' if port_open else 'Port may be in use'
+        })
+
+        # Check 5: Nginx config
+        ng_conf = os.path.join(public.get_panel_path(), 'vhost', 'nginx', 'java_{}.conf'.format(project_name))
+        if os.path.exists(ng_conf):
+            diagnostics['checks'].append({'name': 'Nginx configuration', 'status': 'pass', 'detail': ng_conf})
+        else:
+            diagnostics['checks'].append({'name': 'Nginx configuration', 'status': 'warn', 'detail': 'Nginx config not found: {}'.format(ng_conf)})
+            diagnostics['suggestions'].append('Nginx configuration may need to be regenerated for this project.')
+
+        # Summary
+        failing = [c for c in diagnostics['checks'] if c['status'] == 'fail']
+        warnings = [c for c in diagnostics['checks'] if c['status'] == 'warn']
+        diagnostics['summary'] = {
+            'total_checks': len(diagnostics['checks']),
+            'passed': len([c for c in diagnostics['checks'] if c['status'] == 'pass']),
+            'warnings': len(warnings),
+            'failures': len(failing),
+            'status': 'healthy' if not failing else 'degraded' if warnings else 'needs_attention',
+        }
+
+        return public.success_v2(diagnostics)
+
     # WP添加站点
     def add_sites(self, get, app=None, multiple=None):
         task_status = os.path.join('/tmp', 'wp_aapanel_deploy.log')

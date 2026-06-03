@@ -1783,6 +1783,75 @@ include /www/server/panel/vhost/openlitespeed/proxy/BTSITENAME/*.conf
 
         return public.success_v2(diagnostics)
 
+    def redeploy_war(self, get):
+        """
+        Redeploy a WAR to an existing Tomcat project, replacing the current release.
+
+        Expected get args:
+            project_id      (int)   Site ID from database
+            source_type     (str)   "browser_upload" | "server_path" | "url" | "exploded_dir"
+            source_config   (dict)  Depends on source_type
+            health_check_path (str) Optional, default "/"
+
+        Returns: public.success_v2 / public.fail_v2
+        """
+        return self.deploy_war(get)
+
+    def rollback_war(self, get):
+        """
+        Rollback a Tomcat project to a previous release.
+
+        Expected get args:
+            project_id          (int)   Site ID from database
+            target_release_id   (str)   Optional, defaults to the previous release
+
+        Returns: public.success_v2 / public.fail_v2
+        """
+        project_id = get.get('project_id')
+        if not project_id:
+            return public.fail_v2('Missing required parameter: project_id')
+
+        site = public.M('sites').where('id=?', (int(project_id),)).find()
+        if not site:
+            return public.fail_v2('Project not found: {}'.format(project_id))
+
+        if site.get('project_type') != 'Java':
+            return public.fail_v2('Rollback is only supported for Java projects.')
+
+        project_name = site.get('name', '')
+        project_path = site.get('path', '')
+        project_config_str = site.get('project_config', '{}')
+
+        project_config = {}
+        try:
+            if isinstance(project_config_str, str):
+                project_config = json.loads(project_config_str) if project_config_str else {}
+            elif isinstance(project_config_str, dict):
+                project_config = project_config_str
+        except Exception:
+            project_config = {}
+
+        project_config['project_name'] = project_name
+        project_config['path'] = project_path
+
+        target_release_id = get.get('target_release_id')
+
+        try:
+            deploy_adapter = DeploymentAdapter()
+            result = deploy_adapter.rollback_release(
+                project_id=str(project_id),
+                target_release_id=target_release_id,
+                project_config=project_config,
+            )
+        except Exception as ex:
+            return public.fail_v2('Rollback failed: {}'.format(str(ex)))
+
+        if not result.get('status'):
+            return public.fail_v2(result.get('msg', 'Rollback failed.'))
+
+        public.write_log_gettext('Site manager', 'Successfully rolled back project [{}]!', (project_name,))
+        return public.success_v2(result.get('data', {}))
+
     # WP添加站点
     def add_sites(self, get, app=None, multiple=None):
         task_status = os.path.join('/tmp', 'wp_aapanel_deploy.log')

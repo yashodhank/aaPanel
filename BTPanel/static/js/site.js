@@ -1981,9 +1981,23 @@ var site = {
 				{
 					title: lan.site.operate,
 					type: 'group',
-					width: 170,
+					width: 240,
 					align: 'right',
 					group: [
+						{
+							title: 'Deploy',
+							event: function (row, index, ev, key, that) {
+								site.deploy_war(row.id);
+							},
+						},
+						{
+							title: 'Rollback',
+							event: function (row, index, ev, key, that) {
+								site.rollback_war(row.id, row.name, function () {
+									that.$refresh_table_list(true);
+								});
+							},
+						},
 						{
 							title: 'Diagnose',
 							event: function (row, index, ev, key, that) {
@@ -4588,64 +4602,227 @@ var site = {
 	},
 
 	deploy_war: function (siteId) {
-		var dform = bt_tools.form({
-			form: [
-				{
-					label: 'WAR File',
-					group: {
-						type: 'text',
-						name: 'deploy_war_file',
-						width: '320px',
-						placeholder: 'Click to select a WAR file (max 200MB)',
-						icon: {
-							type: 'glyphicon-folder-open',
-							select: 'file',
-							event: function (ev, that, input) {
-								bt.select_path('deploy_war_file', 'file', function (path) {
-									input.val(path);
-								});
-							},
-						},
-					},
-				},
-			],
-		});
-		bt_tools.open({
+		var activeTab = 'upload';
+		var configCache = {};
+
+		var buildSourceConfig = function () {
+			var cfg = {};
+			if (activeTab === 'upload') {
+				cfg = { filename: configCache.filename || 'app.war', file_data: configCache.file_data };
+			} else if (activeTab === 'server_path') {
+				cfg = { path: configCache.server_path || '' };
+			} else if (activeTab === 'url') {
+				cfg = { url: configCache.artifact_url || '' };
+			} else if (activeTab === 'exploded') {
+				cfg = { path: configCache.exploded_path || '' };
+			}
+			return cfg;
+		};
+
+		var renderTabs = function () {
+			var tabs = [
+				{ key: 'upload', label: 'Upload WAR', active: activeTab === 'upload' },
+				{ key: 'server_path', label: 'Server Path', active: activeTab === 'server_path' },
+				{ key: 'url', label: 'URL', active: activeTab === 'url' },
+				{ key: 'exploded', label: 'Exploded Dir', active: activeTab === 'exploded' },
+			];
+			var html = '<div style="margin-bottom:15px;border-bottom:1px solid #eee;">';
+			tabs.forEach(function (t) {
+				html += '<span class="deploy-tab" data-tab="' + t.key + '" style="cursor:pointer;display:inline-block;padding:8px 16px;font-size:13px;' +
+					(t.active ? 'border-bottom:2px solid #20a53a;color:#20a53a;font-weight:600;' : 'color:#666;') + '">' + t.label + '</span>';
+			});
+			html += '</div>';
+			return html;
+		};
+
+		var renderTabContent = function () {
+			if (activeTab === 'upload') {
+				return '<div class="line">' +
+					'<span class="tname">WAR File</span>' +
+					'<div class="info-r">' +
+					'<input type="text" name="deploy_war_file" class="bt-input-text" style="width:320px;" placeholder="Click to select a WAR file (max 200MB)" readonly />' +
+					'<span class="glyphicon glyphicon-folder-open cursor" style="margin-left:8px;" id="deploy_war_select" title="Browse"></span>' +
+					'</div></div>';
+			} else if (activeTab === 'server_path') {
+				return '<div class="line">' +
+					'<span class="tname">Server Path</span>' +
+					'<div class="info-r">' +
+					'<input type="text" name="deploy_war_path" class="bt-input-text" style="width:320px;" placeholder="/path/to/app.war" />' +
+					'<span class="glyphicon glyphicon-folder-open cursor" style="margin-left:8px;" id="deploy_path_select" title="Browse"></span>' +
+					'</div></div>';
+			} else if (activeTab === 'url') {
+				return '<div class="line">' +
+					'<span class="tname">Artifact URL</span>' +
+					'<div class="info-r">' +
+					'<input type="text" name="deploy_war_url" class="bt-input-text" style="width:380px;" placeholder="https://example.com/app.war" />' +
+					'</div></div>';
+			} else if (activeTab === 'exploded') {
+				return '<div class="line">' +
+					'<span class="tname">Directory</span>' +
+					'<div class="info-r">' +
+					'<input type="text" name="deploy_exploded_path" class="bt-input-text" style="width:320px;" placeholder="/path/to/exploded/webapp" />' +
+					'<span class="glyphicon glyphicon-folder-open cursor" style="margin-left:8px;" id="deploy_exploded_select" title="Browse"></span>' +
+					'</div></div>';
+			}
+			return '';
+		};
+
+		var contentHtml = '<div id="deploy_modal_content" style="padding:15px;">' +
+			'<div id="deploy_tabs"></div>' +
+			'<div id="deploy_tab_content"></div>' +
+			'<div style="margin-top:10px;font-size:11px;color:#999;">Supported: .war files (max 200MB), exploded webapp directories, and remote HTTP(S) URLs</div>' +
+			'</div>';
+
+		var layerIndex = bt_tools.open({
 			title: 'Deploy WAR to Project',
-			skin: 'custom_layer',
-			btn: [lan.public.submit, lan.site.no],
-			content: dform.$reader_content(),
+			area: ['600px', '300px'],
+			btn: ['Deploy', 'Cancel'],
+			content: contentHtml,
 			success: function ($layer) {
-				dform.$event_bind();
+				$('#deploy_tabs').html(renderTabs());
+				$('#deploy_tab_content').html(renderTabContent());
+
+				$('.deploy-tab').on('click', function () {
+					activeTab = $(this).data('tab');
+					$('.deploy-tab').each(function () {
+						var t = $(this).data('tab');
+						$(this).css('border-bottom', t === activeTab ? '2px solid #20a53a' : 'none');
+						$(this).css('color', t === activeTab ? '#20a53a' : '#666');
+						$(this).css('font-weight', t === activeTab ? '600' : '400');
+					});
+					$('#deploy_tab_content').html(renderTabContent());
+					if (activeTab === 'upload') {
+						$('#deploy_war_select').on('click', function () {
+							bt.select_path('deploy_war_file', 'file', function (path) {
+								$('input[name=deploy_war_file]').val(path);
+								configCache.filename = path.split('/').pop();
+							});
+						});
+					} else if (activeTab === 'server_path') {
+						$('#deploy_path_select').on('click', function () {
+							bt.select_path('deploy_war_path', 'file', function (path) {
+								$('input[name=deploy_war_path]').val(path);
+							});
+						});
+					} else if (activeTab === 'exploded') {
+						$('#deploy_exploded_select').on('click', function () {
+							bt.select_path('deploy_exploded_path', 'folder', function (path) {
+								$('input[name=deploy_exploded_path]').val(path);
+							});
+						});
+					}
+				});
+
+				$('#deploy_war_select').on('click', function () {
+					bt.select_path('deploy_war_file', 'file', function (path) {
+						$('input[name=deploy_war_file]').val(path);
+						configCache.filename = path.split('/').pop();
+					});
+				});
 			},
 			yes: function (indexs) {
-				var fv = dform.$get_form_value();
-				if (!fv.deploy_war_file) {
-					bt_tools.msg('Please select a WAR file', 2);
-					return false;
+				var sourceType = activeTab === 'server_path' ? 'server_path' : activeTab === 'url' ? 'url' : activeTab === 'exploded' ? 'exploded_dir' : 'browser_upload';
+				var sourceConfig = {};
+
+				if (activeTab === 'server_path') {
+					sourceConfig.path = $('input[name=deploy_war_path]').val();
+					if (!sourceConfig.path) { bt_tools.msg('Please enter a server path', 2); return false; }
+				} else if (activeTab === 'url') {
+					sourceConfig.url = $('input[name=deploy_war_url]').val();
+					if (!sourceConfig.url) { bt_tools.msg('Please enter a URL', 2); return false; }
+				} else if (activeTab === 'exploded') {
+					sourceConfig.path = $('input[name=deploy_exploded_path]').val();
+					if (!sourceConfig.path) { bt_tools.msg('Please enter a directory path', 2); return false; }
+				} else {
+					var fp = $('input[name=deploy_war_file]').val();
+					if (!fp) { bt_tools.msg('Please select a WAR file', 2); return false; }
+					var ext = fp.split('.').pop().toLowerCase();
+					if (ext !== 'war') { bt_tools.msg('Only .war files are supported', 2); return false; }
+					sourceConfig = { filename: fp.split('/').pop(), path: fp };
+					sourceType = 'server_path';
 				}
-				var ext = fv.deploy_war_file.split('.').pop().toLowerCase();
-				if (ext !== 'war') {
-					bt_tools.msg('Only .war files are supported', 2);
-					return false;
-				}
-				var loading = bt.load('Deploying WAR, please wait...');
-				bt.send('deploy_war', '/project?action=deploy_war', {
-					site_id: siteId,
-					war_file: fv.deploy_war_file,
+
+				var loading = bt.load('Deploying, please wait...');
+				bt_tools.send({
+					url: '/site?action=deploy_war',
+					data: {
+						project_id: siteId,
+						source_type: sourceType,
+						source_config: JSON.stringify(sourceConfig),
+					}
 				}, function (rdata) {
 					loading.close();
 					if (rdata.status) {
 						layer.close(indexs);
-						bt.msg({ msg: 'WAR deployed successfully', icon: 1 });
-						site_table.$refresh_table_list(true);
+						bt.msg({ msg: 'Deployed successfully. Release: ' + (rdata.releaseId || ''), icon: 1 });
+						site_table && site_table.$refresh_table_list(true);
+						java_table && java_table.$refresh_table_list(true);
 					} else {
-						bt.msg(rdata);
+						bt.msg({ status: false, msg: rdata.msg || 'Deployment failed' });
 					}
 				});
 			},
 		});
 	},
+
+	rollback_war: function (siteId, siteName, callback) {
+		var dform = bt_tools.form({
+			form: [
+				{
+					label: 'Actions',
+					group: {
+						type: 'help',
+						list: [
+							'<div style="border:1px solid #f5a623;background:#fff8e1;padding:10px;border-radius:4px;margin-bottom:8px;">' +
+							'<strong style="color:#e65100;">Warning:</strong> This will revert the project to its previous deployment. The current deployment will be replaced. Nginx will be switched to the previous upstream.</div>',
+						],
+					},
+				},
+				{
+					label: 'Rollback to',
+					group: {
+						type: 'select',
+						name: 'rollback_target',
+						width: '200px',
+						list: [
+							{ title: 'Previous release (default)', value: '' },
+						],
+					},
+				},
+			],
+		});
+		bt_tools.open({
+			title: 'Rollback - ' + (siteName || ''),
+			area: ['550px', '280px'],
+			btn: ['Rollback', 'Cancel'],
+			content: dform.$reader_content(),
+			success: function () {
+				dform.$event_bind();
+			},
+			yes: function (indexs) {
+				bt.confirm({ title: 'Confirm Rollback', msg: 'Are you sure you want to rollback this project to the previous release? This may affect running applications.' }, function () {
+					var fv = dform.$get_form_value();
+					var loading = bt.load('Rolling back...');
+					var data = { project_id: siteId };
+					if (fv.rollback_target) data.target_release_id = fv.rollback_target;
+					bt_tools.send({
+						url: '/site?action=rollback_war',
+						data: data,
+					}, function (rdata) {
+						loading.close();
+						if (rdata.status) {
+							layer.close(indexs);
+							bt.msg({ msg: 'Rolled back to release: ' + (rdata.release_id || 'previous'), icon: 1 });
+							if (callback) callback();
+						} else {
+							bt.msg({ status: false, msg: rdata.msg || 'Rollback failed' });
+						}
+					});
+				});
+			},
+		});
+	},
+
 	set_default_page: function () {
 		bt.open({
 			type: 1,

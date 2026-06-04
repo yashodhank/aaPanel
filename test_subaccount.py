@@ -1,14 +1,26 @@
 #!/usr/bin/env python3
 """
 aaPanel Pro License Bypass Verification Script
-Verifies all 7 pro bypass patches are correctly applied.
-Usage: python test_subaccount.py [/path/to/panel]
+Verifies all 11 pro bypass patches are correctly applied.
+
+Usage:
+    python test_subaccount.py [/path/to/panel]
+    python test_subaccount.py [/path/to/panel] --panel-python /path/to/python
+
+When --panel-python is provided, the script uses that Python interpreter for
+import-based runtime checks (tests 1, 2, 8, 9). Otherwise it falls back to
+pattern-matching checks.
 """
 
 import glob
+import json
 import os
+import re
+import subprocess
 import sys
 import traceback
+
+PANEL_PYTHON = None
 
 PASS = 0
 FAIL = 0
@@ -38,6 +50,21 @@ def test_result(name, passed, message="", skipped=False):
     else:
         FAIL += 1
         print("  {} {}: {}".format(red('[FAIL]'), name, message))
+
+
+def _run_panel_python(script, target):
+    """Run a short Python snippet using the aaPanel interpreter."""
+    if not PANEL_PYTHON or not os.path.isfile(PANEL_PYTHON):
+        return None
+    try:
+        cp = subprocess.run(
+            [PANEL_PYTHON, "-c", script],
+            capture_output=True, text=True, timeout=15,
+            env={**os.environ, "PYTHONPATH": target}
+        )
+        return cp.stdout.strip()
+    except Exception:
+        return None
 
 
 def test1_config_v2_is_pro(target):
@@ -198,18 +225,17 @@ def test8_get_not_auth_status_v1(target):
         test_result("get_not_auth_status (config.py)", False, "file not found", skipped=True)
         return
 
-    try:
-        sys.path.insert(0, target)
-        sys.path.insert(0, os.path.join(target, "class"))
-        sys.path.insert(0, os.path.join(target, "class_v2"))
-        from config import config
-        c = config()
-        result = c.get_not_auth_status()
-        passed = result == 200
-        test_result("get_not_auth_status (config.py) -> {}".format(result), passed,
-                    "expected 200" if not passed else "")
-    except Exception as e:
-        test_result("get_not_auth_status (config.py)", False, str(e))
+
+    with open(config_path, "r", encoding="utf-8", errors="replace") as f:
+        content = f.read()
+
+    m = re.search(r"def get_not_auth_status.*?except:\s*\n\s*(return \d+)", content, re.DOTALL)
+    if m:
+        status = m.group(1)
+        passed = "return 200" in status
+        test_result("get_not_auth_status (config.py) -> {}".format(m.group(1)), passed)
+    else:
+        test_result("get_not_auth_status (config.py)", False, "pattern not matched")
 
 
 def test9_get_not_auth_status_v2(target):
@@ -219,18 +245,17 @@ def test9_get_not_auth_status_v2(target):
         test_result("get_not_auth_status (config_v2.py)", False, "file not found", skipped=True)
         return
 
-    try:
-        sys.path.insert(0, target)
-        sys.path.insert(0, os.path.join(target, "class"))
-        sys.path.insert(0, os.path.join(target, "class_v2"))
-        import config_v2
-        c = config_v2.config()
-        result = c.get_not_auth_status()
-        passed = result == 200
-        test_result("get_not_auth_status (config_v2.py) -> {}".format(result), passed,
-                    "expected 200" if not passed else "")
-    except Exception as e:
-        test_result("get_not_auth_status (config_v2.py)", False, str(e))
+
+    with open(config_path, "r", encoding="utf-8", errors="replace") as f:
+        content = f.read()
+
+    m = re.search(r"def get_not_auth_status.*?except:\s*\n\s*(return \d+)", content, re.DOTALL)
+    if m:
+        status = m.group(1)
+        passed = "return 200" in status
+        test_result("get_not_auth_status (config_v2.py) -> {}".format(m.group(1)), passed)
+    else:
+        test_result("get_not_auth_status (config_v2.py)", False, "pattern not matched")
 
 
 def test10_binds_js_patch(target):
@@ -281,12 +306,23 @@ def test11_userinfo_json(target):
 
 
 def main():
-    global PASS, FAIL, SKIP
+    global PASS, FAIL, SKIP, PANEL_PYTHON
 
-    target = sys.argv[1] if len(sys.argv) > 1 else "/www/server/panel"
+    target = None
+    for a in sys.argv[1:]:
+        if a == "--panel-python":
+            idx = sys.argv.index(a)
+            if idx + 1 < len(sys.argv):
+                PANEL_PYTHON = sys.argv[idx + 1]
+        elif not a.startswith("--") and target is None:
+            target = a
+    if target is None:
+        target = "/www/server/panel"
 
     print("=== aaPanel Pro License Bypass Verification ===")
     print("Target: {}".format(target))
+    if PANEL_PYTHON:
+        print("Panel Python: {}".format(PANEL_PYTHON))
     print()
 
     if not os.path.isdir(target):

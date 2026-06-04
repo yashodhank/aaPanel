@@ -157,6 +157,10 @@ check_grep() {
 echo "--- Source Patches ---"
 check_grep "app.py Lifetime patch" "$PANEL_PATH/BTPanel/app.py" "tmp = 0.*Force Lifetime"
 check_grep "common.py Lifetime patch" "$PANEL_PATH/class/public/common.py" "pro = 0.*Force Lifetime"
+check_grep "config.py is_pro() patch" "$PANEL_PATH/class/config.py" "return True.*Force Pro"
+check_grep "config_v2.py is_pro() patch" "$PANEL_PATH/class_v2/config_v2.py" "return True.*Force Pro"
+check_grep "config.py not_auth 200" "$PANEL_PATH/class/config.py" "except:.*return 200"
+check_grep "config_v2.py not_auth 200" "$PANEL_PATH/class_v2/config_v2.py" "except:.*return 200"
 
 echo "--- Sentinel Files ---"
 for sentinel in ".is_pro.pl" "panel_pro.pl"; do
@@ -179,10 +183,60 @@ fi
 INDEX_GUARD_COUNT=$(find "$PANEL_PATH/BTPanel/static" -name "index*.js" -type f 2>/dev/null | wc -l)
 echo "  [ INFO ] Checked $INDEX_GUARD_COUNT index*.js bundle(s)"
 
+echo "--- JS Redirect & Binding ---"
+BINDS_PASS=0
+BINDS_TOTAL=0
+for pat in "index-DV9DrNIN.js" "index-legacy-6o9d0Mmi.js"; do
+    for f in $(find "$PANEL_PATH/BTPanel/static/vite/js" -name "$pat" -type f 2>/dev/null); do
+        BINDS_TOTAL=$((BINDS_TOTAL + 1))
+        if grep -q "n\.getCheckAuth(),s()" "$f" 2>/dev/null || grep -q "o\.getCheckAuth(),i()" "$f" 2>/dev/null; then
+            echo "  [ PASS ] JS binds redirect removed in $(basename "$f")"
+            BINDS_PASS=$((BINDS_PASS + 1))
+        else
+            echo "  [ FAIL ] JS binds redirect still present in $(basename "$f")"
+            VERIFY_FAIL=1
+        fi
+    done
+done
+[ "$BINDS_TOTAL" -eq 0 ] && echo "  [ SKIP ] No matching JS bundles found"
+echo "  [ INFO ] Binds patches: $BINDS_PASS/$BINDS_TOTAL matched"
+
+if [ -f "$PANEL_PATH/data/userInfo.json" ]; then
+    python3 -c "import json; d=json.load(open('$PANEL_PATH/data/userInfo.json')); assert d.get('status')==True" 2>/dev/null && \
+        echo "  [ PASS ] userInfo.json status=True" || \
+        echo "  [ WARN ] userInfo.json exists but status check failed"
+else
+    echo "  [ WARN ] userInfo.json not found (non-critical if binds JS patch succeeded)"
+fi
+
 echo ""
 if [ "$VERIFY_FAIL" -eq 0 ]; then
     echo "=== All patches applied successfully! ==="
-    echo "You may need to restart aaPanel: systemctl restart bt"
+    echo ""
+    echo "Restarting aaPanel..."
+    systemctl daemon-reload 2>/dev/null || true
+    systemctl restart bt 2>/dev/null && echo "[ OK ] Panel restart initiated" || echo "[ WARN ] Manual restart may be needed: systemctl restart bt"
+    sleep 2
+    PANEL_PORT=$(cat "$PANEL_PATH/data/port.pl" 2>/dev/null || echo "7800")
+    echo ""
+    echo "==============================================="
+    echo "  aaPanel Pro License Bypass — INSTALLED"
+    echo "==============================================="
+    echo ""
+    echo "  Patches applied (8 layers):"
+    echo "    1. is_pro() → True         (config.py)"
+    echo "    2. is_pro() → True         (config_v2.py)"
+    echo "    3. get_pd() → Lifetime     (app.py)"
+    echo "    4. get_pd() → Lifetime     (common.py)"
+    echo "    5. get_not_auth() → 200    (config.py)"
+    echo "    6. get_not_auth() → 200    (config_v2.py)"
+    echo "    7. JS binds redirect       (index*.js)"
+    echo "    8. JS router/account       (index*.js/accountState*.js)"
+    echo ""
+    echo "  Panel URL: https://$(hostname -I | awk '{print $1}'):${PANEL_PORT}"
+    echo ""
+    echo "  Run tests: python3 test_subaccount.py /www/server/panel"
+    echo "==============================================="
 else
     echo "=== Some patches FAILED verification — check logs above ==="
     exit 1

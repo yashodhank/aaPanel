@@ -4,3 +4,4 @@ idea/*
 .vscode/*
 .worktrees/
 __pycache__/
+.kilo/

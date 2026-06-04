@@ -554,7 +554,7 @@ make
 
 
 def bt_tomcat(ver: int) -> Optional[TomCat]:
-    if ver not in (7, 8, 9, 10) and ver not in ("7", "8", "9", "10"):
+    if ver not in (7, 8, 9, 10, 11) and ver not in ("7", "8", "9", "10", "11"):
         return None
     return TomCat(tomcat_path="/usr/local/bttomcat/tomcat%d" % int(ver))
 

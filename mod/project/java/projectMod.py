@@ -781,7 +781,7 @@ class main(JvavWebConfig, Proxy, Redirect, GitMager):
         if not os.path.exists(project_path):
             os.makedirs(project_path)
             public.set_own(project_path, 'www')
-        if tomcat_version not in (7, 8, 9, 10):
+        if tomcat_version not in (7, 8, 9, 10, 11):
             return "请选择正确的Tomcat版本"
 
         if jdk_path is not None:
@@ -918,7 +918,7 @@ class main(JvavWebConfig, Proxy, Redirect, GitMager):
         if not os.path.exists(project_path):
             os.makedirs(project_path)
             public.set_own(project_path, 'www')
-        if tomcat_version not in (7, 8, 9, 10):
+        if tomcat_version not in (7, 8, 9, 10, 11):
             return "请选择正确的Tomcat版本"
 
         if jdk_path:

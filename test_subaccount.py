@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
 aaPanel Pro License Bypass Verification Script
-Verifies all 11 pro bypass patches are correctly applied.
+Verifies all 13 pro bypass patches are correctly applied.
 
 Usage:
     python test_subaccount.py [/path/to/panel]
     python test_subaccount.py [/path/to/panel] --panel-python /path/to/python
 
 When --panel-python is provided, the script uses that Python interpreter for
-import-based runtime checks (tests 1, 2, 8, 9). Otherwise it falls back to
+import-based runtime checks (tests 1-2, 8-9). Otherwise it falls back to
 pattern-matching checks.
 """
 
@@ -305,7 +305,38 @@ def test11_userinfo_json(target):
         test_result("userInfo.json", False, str(e))
 
 
-def main():
+def test12_A_soft_catalog(target):
+    """Test 12a: soft_catalog.json exists with valid plugins"""
+    catalog_path = os.path.join(target, "data", "soft_catalog.json")
+    if not os.path.isfile(catalog_path):
+        test_result("soft_catalog.json exists", False, "file not found", skipped=True)
+        return
+    try:
+        with open(catalog_path, "r") as f:
+            data = json.load(f)
+        count = len(data.get("list", []))
+        passed = count >= 10
+        test_result("soft_catalog.json ({}) plugins".format(count), passed,
+                    "expected >= 10, got {}".format(count))
+    except Exception as e:
+        test_result("soft_catalog.json", False, str(e))
+
+
+def test12_B_load_soft_list_fallback(target):
+    """Test 12b: load_soft_list has local catalog fallback"""
+    common_path = os.path.join(target, "class", "public", "common.py")
+    if not os.path.isfile(common_path):
+        test_result("load_soft_list fallback", False, "file not found", skipped=True)
+        return
+    try:
+        with open(common_path, "r", encoding="utf-8", errors="replace") as f:
+            content = f.read()
+        has_catalog = "_load_local_catalog" in content
+        has_guard = "resp.ok and resp.text and len(resp.text) > 100" in content
+        test_result("load_soft_list _load_local_catalog()", has_catalog)
+        test_result("load_soft_list API empty guard", has_guard)
+    except Exception as e:
+        test_result("load_soft_list fallback", False, str(e))
     global PASS, FAIL, SKIP, PANEL_PYTHON
 
     target = None
@@ -346,6 +377,9 @@ def main():
     print("--- Binds Redirect Patch ---")
     test10_binds_js_patch(target)
     test11_userinfo_json(target)
+    print("--- Plugin Catalog ---")
+    test12_A_soft_catalog(target)
+    test12_B_load_soft_list_fallback(target)
 
     print()
     total = PASS + FAIL + SKIP

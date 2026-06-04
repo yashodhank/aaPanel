@@ -134,6 +134,88 @@ if [ -f "$PANEL_PATH/BTPanel/app.py" ]; then
     fi
 fi
 
+# Step 4c3: Deploy offline plugin catalog + patch load_soft_list fallback
+echo "[ patch ] Step 4c3: Deploying offline plugin catalog..."
+CATALOG_SRC="$REPO_PATH/data/soft_catalog.json"
+if [ -f "$CATALOG_SRC" ]; then
+    cp "$CATALOG_SRC" "$PANEL_PATH/data/soft_catalog.json"
+    echo "[ patch ] Plugin catalog deployed (41 plugins)"
+else
+    echo "[ WARN ] soft_catalog.json not found at $CATALOG_SRC — catalog will be empty"
+fi
+
+# Step 4c3b: Patch load_soft_list() for offline catalog fallback
+echo "[ patch ] Step 4c3b: Patching load_soft_list() for offline fallback..."
+python3 << 'PYEOF'
+import sys
+common_path = '/www/server/panel/class/public/common.py'
+with open(common_path, 'r') as f:
+    content = f.read()
+
+if '_load_local_catalog' in content:
+    print('[ patch ] _load_local_catalog already present, skipping')
+else:
+    # 1) Add _load_local_catalog function
+    old1 = "return {'list': [], 'total': 0, 'pages': 0}\n\n\ndef load_soft_list"
+    new1 = "return {'list': [], 'total': 0, 'pages': 0}\n\n\ndef _load_local_catalog():\n    import json\n    catalog_path = '{}/data/soft_catalog.json'.format(get_panel_path())\n    try:\n        if os.path.exists(catalog_path):\n            with open(catalog_path, 'r') as f:\n                data = json.load(f)\n            if isinstance(data, dict) and 'list' in data:\n                return data\n    except:\n        pass\n    return None\n\n\ndef load_soft_list"
+    if old1 not in content:
+        print('[ FAIL ] Could not find insertion point for _load_local_catalog')
+        sys.exit(1)
+    content = content.replace(old1, new1)
+    print('[ patch ] Added _load_local_catalog()')
+
+    # 2) parse_plugin_list failure -> catalog
+    old2 = 'if not PluginLoader.parse_plugin_list(1):\n                    return _empty_soft_list()'
+    if old2 in content:
+        content = content.replace(old2, 'if not PluginLoader.parse_plugin_list(1):\n                    catalog = _load_local_catalog()\n                    if catalog is not None:\n                        return catalog\n                    return _empty_soft_list()')
+        print('[ patch ] parse_plugin_list catalog fallback')
+
+    # 3) PluginLoader except -> catalog
+    old3 = 'plugin_list_data = PluginLoader.get_plugin_list(0)\n    except:\n        if retry_count < 6:\n            # ' + '\xe8\x8e\xb7\xe5\x8f\x96\xe8\xbd\xaf\xe4\xbb\xb6\xe5\x88\x97\xe8\xa1\xa8\xe5\xa4\xb1\xe8\xb4\xa5\xef\xbc\x8c\xe9\x87\x8d\xe8\xaf\x95\n            return load_soft_list(force, retry_count + 1)\n        return _empty_soft_list()'
+    # Use regex-free approach: match the structure
+    lines = content.split('\n')
+    new_lines = []
+    i = 0
+    while i < len(lines):
+        new_lines.append(lines[i])
+        if 'plugin_list_data = PluginLoader.get_plugin_list(0)' in lines[i] and i+1 < len(lines) and 'except:' in lines[i+1]:
+            # Found the except block, insert catalog fallback before retry
+            indent = '        '
+            new_lines.append(indent + 'catalog = _load_local_catalog()')
+            new_lines.append(indent + 'if catalog is not None:')
+            new_lines.append(indent + '    return catalog')
+            i += 1  # skip the original except line, we'll add it
+            new_lines.append(lines[i])  # except:
+        i += 1
+    content = '\n'.join(new_lines)
+    print('[ patch ] PluginLoader except catalog fallback')
+
+    # 4) isinstance check -> catalog
+    old4 = 'if not isinstance(plugin_list_data, dict):\n        if retry_count < 6:\n            # ' + '\xe8\x8e\xb7\xe5\x8f\x96\xe8\xbd\xaf\xe4\xbb\xb6\xe5\x88\x97\xe8\xa1\xa8\xe5\xa4\xb1\xe8\xb4\xa5\xef\xbc\x8c\xe9\x87\x8d\xe8\xaf\x95\n            return load_soft_list(force, retry_count + 1)\n        return _empty_soft_list()'
+    if old4 in content:
+        content = content.replace(old4, 'if not isinstance(plugin_list_data, dict):\n        catalog = _load_local_catalog()\n        if catalog is not None:\n            return catalog\n        if retry_count < 6:\n            return load_soft_list(force, retry_count + 1)\n        return _empty_soft_list()')
+        print('[ patch ] isinstance check catalog fallback')
+
+    # 5) status==False -> catalog
+    old5 = "if 'status' in plugin_list_data and 'msg' in plugin_list_data and plugin_list_data['status'] == False:\n        if retry_count < 6:\n            # " + '\xe8\x8e\xb7\xe5\x8f\x96\xe8\xbd\xaf\xe4\xbb\xb6\xe5\x88\x97\xe8\xa1\xa8\xe5\xa4\xb1\xe8\xb4\xa5\xef\xbc\x8c\xe9\x87\x8d\xe8\xaf\x95\n            return load_soft_list(force, retry_count + 1)\n        return _empty_soft_list()'
+    if old5 in content:
+        content = content.replace(old5, "if 'status' in plugin_list_data and 'msg' in plugin_list_data and plugin_list_data['status'] == False:\n        catalog = _load_local_catalog()\n        if catalog is not None:\n            return catalog\n        if retry_count < 6:\n            return load_soft_list(force, retry_count + 1)\n        return _empty_soft_list()")
+        print('[ patch ] status==False catalog fallback')
+
+    # 6) API empty response guard
+    old6 = 'if resp.ok:\n                with open(local_cache_file,'
+    if old6 in content:
+        content = content.replace(
+            'if resp.ok:\n                with open(local_cache_file, \'w\') as fp:\n                    fp.write(resp.text)\n                update_ok = True',
+            'if resp.ok and resp.text and len(resp.text) > 100:\n                with open(local_cache_file, \'w\') as fp:\n                    fp.write(resp.text)\n                update_ok = True'
+        )
+        print('[ patch ] API empty response guard')
+
+    with open(common_path, 'w') as f:
+        f.write(content)
+    print('[ patch ] load_soft_list fully patched for offline catalog')
+PYEOF
+
 # Step 4d: Verify all patches
 echo ""
 echo "=== Verification ==="
@@ -161,6 +243,8 @@ check_grep "config.py is_pro() patch" "$PANEL_PATH/class/config.py" "return True
 check_grep "config_v2.py is_pro() patch" "$PANEL_PATH/class_v2/config_v2.py" "return True.*Force Pro"
 check_grep "config.py not_auth 200" "$PANEL_PATH/class/config.py" "except:.*return 200"
 check_grep "config_v2.py not_auth 200" "$PANEL_PATH/class_v2/config_v2.py" "except:.*return 200"
+check_grep "common.py catalog fallback" "$PANEL_PATH/class/public/common.py" "_load_local_catalog"
+check_grep "common.py empty resp guard" "$PANEL_PATH/class/public/common.py" "resp.ok and resp.text and len(resp.text) > 100"
 
 echo "--- Sentinel Files ---"
 for sentinel in ".is_pro.pl" "panel_pro.pl"; do
@@ -209,7 +293,15 @@ else
     echo "  [ WARN ] userInfo.json not found (non-critical if binds JS patch succeeded)"
 fi
 
-echo ""
+echo "--- Offline Plugin Catalog ---"
+if [ -f "$PANEL_PATH/data/soft_catalog.json" ]; then
+    PLUGIN_COUNT=$(python3 -c "import json; d=json.load(open('$PANEL_PATH/data/soft_catalog.json')); print(len(d.get('list',[])))" 2>/dev/null || echo "0")
+    echo "  [ PASS ] soft_catalog.json deployed ($PLUGIN_COUNT plugins)"
+else
+    echo "  [ FAIL ] soft_catalog.json MISSING"
+    VERIFY_FAIL=1
+fi
+check_grep "load_soft_list offline fallback" "$PANEL_PATH/class/public/common.py" "_load_local_catalog"
 if [ "$VERIFY_FAIL" -eq 0 ]; then
     echo "=== All patches applied successfully! ==="
     echo ""
@@ -223,7 +315,7 @@ if [ "$VERIFY_FAIL" -eq 0 ]; then
     echo "  aaPanel Pro License Bypass — INSTALLED"
     echo "==============================================="
     echo ""
-    echo "  Patches applied (8 layers):"
+    echo "  Patches applied (9 layers):"
     echo "    1. is_pro() → True         (config.py)"
     echo "    2. is_pro() → True         (config_v2.py)"
     echo "    3. get_pd() → Lifetime     (app.py)"
@@ -232,6 +324,7 @@ if [ "$VERIFY_FAIL" -eq 0 ]; then
     echo "    6. get_not_auth() → 200    (config_v2.py)"
     echo "    7. JS binds redirect       (index*.js)"
     echo "    8. JS router/account       (index*.js/accountState*.js)"
+    echo "    9. Plugin catalog offline (soft_catalog.json + load_soft_list)"
     echo ""
     echo "  Panel URL: https://$(hostname -I | awk '{print $1}'):${PANEL_PORT}"
     echo ""

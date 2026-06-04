@@ -646,6 +646,8 @@ class panelPlugin:
 
     #取本地插件
     def get_local_plugin(self,sList):
+        if not os.path.isdir('plugin/'):
+            return sList
         for name in os.listdir('plugin/'):
             isExists = False
             for softInfo in sList:
@@ -1582,6 +1584,8 @@ class panelPlugin:
         result = self.GetPage(arr,get)
         arr = result['data']
         for i in range(len(arr)):
+            if not isinstance(arr[i], dict):
+                continue
             arr[i]['end'] = '--'
             #if 'price' in arr[i]:
             #    if arr[i]['price'] > 0:

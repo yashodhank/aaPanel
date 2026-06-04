@@ -483,7 +483,11 @@ echo "${NODE_URL}"
             )
             raise public.PanelError(error)
         
-        shell_str = (
+        if version in ("10", "11"):
+            local_script = public.get_panel_path() + '/install/tomcat_install.sh'
+            shell_str = ("bash %s %s %s %s >>%s" % (local_script, action, version, jdk_path, tmp_file))
+        else:
+            shell_str = (
                         'rm -rf /tmp/1.sh && '
                         'wget -O /tmp/1.sh %s/install/src/webserver/shell/new_jdk.sh && '
                         'bash /tmp/1.sh %s %s  %s >>%s'
@@ -691,7 +695,12 @@ make
             else:
                 return False
         elif version == '10' or version == 'tomcat10' or version == 10:
-            if self.xml_init('/usr/local/bttomcat/tomcat10/conf/server.xml'):
+            if self.xml_init(self.__tomcat10_server):
+                return True
+            else:
+                return False
+        elif version == '11' or version == 'tomcat11' or version == 11:
+            if self.xml_init(self.__tomcat11_server):
                 return True
             else:
                 return False
@@ -3535,7 +3544,7 @@ make
     
     def get_tomcat_domain(self, get):
         verison = str(get.version).strip()
-        version_list = ["7", "8", "9"]
+        version_list = ["7", "8", "9", "10", "11"]
         if verison not in version_list: return public.returnMsg(False, 'Please select a version')
         data = public.M('sites').where('project_type=?', ('Java')).select()
         ret = []
@@ -3706,6 +3715,22 @@ make
                 public.ExecShell(
                     'cp -r %s/* %s && chown -R www:www %s' % (
                     self.__tomcat9_path_bak, self.__site_path + domain, self.__site_path + domain)
+                    )
+            if tomcat_version == 'tomcat10' or tomcat_version == '10':
+                if not os.path.exists(self.__tomcat10_path_bak + '/conf/server.xml'): return public.returnMsg(
+                    False, "Tomcat10 configuration file does not exist, please reinstall Tomcat10"
+                    )
+                public.ExecShell(
+                    'cp -r %s/* %s && chown -R www:www %s' % (
+                    self.__tomcat10_path_bak, self.__site_path + domain, self.__site_path + domain)
+                    )
+            if tomcat_version == 'tomcat11' or tomcat_version == '11':
+                if not os.path.exists(self.__tomcat11_path_bak + '/conf/server.xml'): return public.returnMsg(
+                    False, "Tomcat11 configuration file does not exist, please reinstall Tomcat11"
+                    )
+                public.ExecShell(
+                    'cp -r %s/* %s && chown -R www:www %s' % (
+                    self.__tomcat11_path_bak, self.__site_path + domain, self.__site_path + domain)
                     )
             # server.xml
             if os.path.exists(self.__site_path + domain + '/conf/server.xml'):
@@ -4764,11 +4789,13 @@ make
         if not projects:
             return public.returnMsg(False, "No sites selected for startup")
         
-        neizhi_projects = {'7': False, '8': False, '9': False}
+        neizhi_projects = {'7': False, '8': False, '9': False, '10': False, '11': False}
         _check = self.get_tomcat_version(None)
         if not _check["tomcat7"]["status"]: neizhi_projects.pop("7")
         if not _check["tomcat8"]["status"]: neizhi_projects.pop("8")
         if not _check["tomcat9"]["status"]: neizhi_projects.pop("9")
+        if not _check["tomcat10"]["status"]: neizhi_projects.pop("10")
+        if not _check["tomcat11"]["status"]: neizhi_projects.pop("11")
         springboot_projects = []
         duli_projects = []
         error_list = []

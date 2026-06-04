@@ -81,6 +81,48 @@ chmod 644 "$PANEL_PATH/data/.is_pro.pl" 2>/dev/null || true
 chmod 644 "$PANEL_PATH/data/panel_pro.pl" 2>/dev/null || true
 echo "[ patch ] Created .is_pro.pl and panel_pro.pl"
 
+# Step 4c1: Patch JS binds redirect (userInfo.status gate)
+echo "[ patch ] Step 4c1: Patching JS binds redirect..."
+python3 -c "
+import os, glob
+panel = os.environ.get('PANEL_PATH', '$PANEL_PATH')
+for pattern in ['index-DV9DrNIN.js', 'index-legacy-6o9d0Mmi.js']:
+    for jsfile in glob.glob(os.path.join(panel, 'BTPanel/static/vite/js', pattern)):
+        with open(jsfile, 'r') as f:
+            content = f.read()
+        content = content.replace(
+            '!n.userInfo.status&&n.aaPanelPro?e.path===\"/binds\"?s():s(\"/binds\"):(n.getCheckAuth(),s())',
+            'n.getCheckAuth(),s()'
+        ).replace(
+            '!o.userInfo.status&&o.aaPanelPro?\"/binds\"===e.path?i():i(\"/binds\"):(o.getCheckAuth(),i())',
+            'o.getCheckAuth(),i()'
+        )
+        with open(jsfile, 'w') as f:
+            f.write(content)
+        print(f'[ patch ] Binds redirect removed in {os.path.basename(jsfile)}')
+" 2>/dev/null || echo "[ WARN ] JS binds patch failed (may already be applied)"
+
+# Step 4c2: Create minimal userInfo.json to satisfy status checks
+echo "[ patch ] Step 4c2: Creating userInfo.json..."
+if [ ! -f "$PANEL_PATH/data/userInfo.json" ]; then
+    python3 -c "
+import json, uuid, time
+ui = {
+    'status': True,
+    'uid': 1,
+    'id': 1,
+    'username': 'admin',
+    'email': 'admin@localhost',
+    'token': str(uuid.uuid4()) + '.' + str(uuid.uuid4()) + '.' + str(uuid.uuid4()),
+    'server_id': 'patched_' + str(int(time.time())),
+    'access_key': 'patched_access_key'
+}
+with open('$PANEL_PATH/data/userInfo.json', 'w') as f:
+    json.dump(ui, f)
+print('Created userInfo.json with status: true')
+"
+fi
+
 # Step 4c-extra: Patch app.py via sed for Lifetime status (belt-and-suspenders)
 echo "[ patch ] Step 4c-extra: Ensuring app.py Lifetime patch..."
 if [ -f "$PANEL_PATH/BTPanel/app.py" ]; then

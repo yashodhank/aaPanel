@@ -233,6 +233,53 @@ def test9_get_not_auth_status_v2(target):
         test_result("get_not_auth_status (config_v2.py)", False, str(e))
 
 
+def test10_binds_js_patch(target):
+    """Test 10: JS binds redirect patched out of main index bundles"""
+    js_dir = os.path.join(target, "BTPanel", "static", "vite", "js")
+    if not os.path.isdir(js_dir):
+        test_result("JS binds redirect patch", False, "js dir not found", skipped=True)
+        return
+    patched = 0
+    unpatched = []
+    for fname in ["index-DV9DrNIN.js", "index-legacy-6o9d0Mmi.js"]:
+        fpath = os.path.join(js_dir, fname)
+        if not os.path.isfile(fpath):
+            unpatched.append(fname)
+            continue
+        try:
+            with open(fpath, "r", encoding="utf-8", errors="replace") as f:
+                content = f.read()
+            if "binds" not in content or '!n.userInfo.status&&' not in content:
+                patched += 1
+            else:
+                unpatched.append(fname)
+        except Exception:
+            unpatched.append(fname)
+    passed = len(unpatched) == 0
+    test_result(
+        "JS binds redirect patched",
+        passed,
+        "patched={}, unpatched={}".format(patched, unpatched)
+    )
+
+
+def test11_userinfo_json(target):
+    """Test 11: userInfo.json exists with status=True"""
+    ui_path = os.path.join(target, "data", "userInfo.json")
+    if not os.path.isfile(ui_path):
+        test_result("userInfo.json exists", False, "file not found", skipped=True)
+        return
+    try:
+        import json
+        with open(ui_path, "r") as f:
+            ui = json.load(f)
+        passed = ui.get("status") is True
+        test_result("userInfo.json status=True", passed,
+                    "status={}".format(ui.get("status")))
+    except Exception as e:
+        test_result("userInfo.json", False, str(e))
+
+
 def main():
     global PASS, FAIL, SKIP
 
@@ -260,6 +307,9 @@ def main():
     print("--- Auth Status Patch ---")
     test8_get_not_auth_status_v1(target)
     test9_get_not_auth_status_v2(target)
+    print("--- Binds Redirect Patch ---")
+    test10_binds_js_patch(target)
+    test11_userinfo_json(target)
 
     print()
     total = PASS + FAIL + SKIP

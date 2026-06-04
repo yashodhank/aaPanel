@@ -34,7 +34,7 @@ TOMCAT_DIR="apache-tomcat-${TOMCAT_MINOR}"
 TOMCAT_TGZ="${TOMCAT_DIR}.tar.gz"
 TC_PATH="/www/server/tomcat${VERSION}"
 BAK_PATH="/www/server/tomcat_bak${VERSION}"
-INIT_SCRIPT="/etc/init.d/tomcat${VERSION}"
+INIT_SCRIPT="/etc/init.d/bttomcat${VERSION}"
 BTT_LINK="/usr/local/bttomcat/tomcat${VERSION}"
 BTT_BAK_LINK="/usr/local/bttomcat/tomcat_bak${VERSION}"
 MIRROR_BASE="https://dlcdn.apache.org/tomcat/tomcat-${TOMCAT_MAJOR}/v${TOMCAT_MINOR}/bin"
@@ -43,9 +43,10 @@ MIRROR_BASE="https://dlcdn.apache.org/tomcat/tomcat-${TOMCAT_MAJOR}/v${TOMCAT_MI
 if [ "$ACTION" = "uninstall" ]; then
     echo "Stopping Tomcat ${VERSION}..."
     [ -x "$INIT_SCRIPT" ] && "$INIT_SCRIPT" stop 2>/dev/null || true
-    rm -rf "$TC_PATH" "$BAK_PATH" "$BTT_LINK" "$BTT_BAK_LINK"
-    rm -f "$INIT_SCRIPT"
+    rm -rf "$TC_PATH" "$BAK_PATH" "$BTT_LINK" "$BTT_BAK_LINK" || true
+    rm -f "$INIT_SCRIPT" || true
     echo "Tomcat ${VERSION} uninstalled."
+    echo "NOTE: JDK at /usr/local/btjdk/ was not removed (may be shared)."
     exit 0
 fi
 
@@ -101,7 +102,7 @@ if [ -z "$JDK_HOME" ]; then
     cd "$TMP_JDK"
 
     CURL=$(command -v /usr/local/curl/bin/curl || echo curl)
-    $CURL -fsSL -o "$JDK_TGZ" "$JDK_URL" || {
+    $CURL -fsSL --retry 3 --retry-delay 5 --max-time 300 -o "$JDK_TGZ" "$JDK_URL" || {
         echo "ERROR: JDK download failed from $JDK_URL"
         rm -rf "$TMP_JDK"
         exit 1
@@ -125,6 +126,15 @@ echo "Using JDK: $JDK_HOME (Java $JAVA_VER)"
 
 # ---- clean & download ----
 echo "Installing Tomcat ${VERSION} (Apache Tomcat ${TOMCAT_MINOR})..."
+if [ -f "${TC_PATH}/version.pl" ]; then
+    INSTALLED_VER=$(cat "${TC_PATH}/version.pl" 2>/dev/null || echo "")
+    if [ "$INSTALLED_VER" = "$TOMCAT_MINOR" ]; then
+        echo "Tomcat ${TOMCAT_MINOR} already installed at ${TC_PATH}"
+        echo "Use 'bash $0 uninstall ${VERSION}' to remove, then reinstall"
+        exit 0
+    fi
+    echo "Upgrading from ${INSTALLED_VER} to ${TOMCAT_MINOR}..."
+fi
 rm -rf "$TC_PATH" "$BAK_PATH" "$BTT_LINK" "$BTT_BAK_LINK"
 
 TMP_DIR="/tmp/tomcat${VERSION}_install_$$"
@@ -133,10 +143,14 @@ cd "$TMP_DIR"
 
 echo "Downloading ${MIRROR_BASE}/${TOMCAT_TGZ}..."
 CURL=$(command -v /usr/local/curl/bin/curl || echo curl)
-$CURL -fsSL -o "$TOMCAT_TGZ" "${MIRROR_BASE}/${TOMCAT_TGZ}" || {
-    echo "ERROR: Download failed from ${MIRROR_BASE}/${TOMCAT_TGZ}"
-    rm -rf "$TMP_DIR"
-    exit 1
+$CURL -fsSL --retry 3 --retry-delay 5 --max-time 300 -o "$TOMCAT_TGZ" "${MIRROR_BASE}/${TOMCAT_TGZ}" || {
+    echo "WARNING: Primary mirror failed, trying archive..."
+    $CURL -fsSL --retry 2 --max-time 300 -o "$TOMCAT_TGZ" \
+        "https://archive.apache.org/dist/tomcat/tomcat-${TOMCAT_MAJOR}/v${TOMCAT_MINOR}/bin/${TOMCAT_TGZ}" || {
+        echo "ERROR: Download failed from all mirrors"
+        rm -rf "$TMP_DIR"
+        exit 1
+    }
 }
 
 # ---- extract ----
@@ -146,7 +160,11 @@ tar -xzf "$TOMCAT_TGZ" -C "$TC_PATH" --strip-components=1
 
 # ---- configure JAVA_HOME ----
 DAEMON_SH="${TC_PATH}/bin/daemon.sh"
-sed -i "1iJAVA_HOME=${JDK_HOME}" "$DAEMON_SH"
+if grep -q "^JAVA_HOME=" "$DAEMON_SH" 2>/dev/null; then
+    sed -i "s|^JAVA_HOME=.*|JAVA_HOME=${JDK_HOME}|" "$DAEMON_SH"
+else
+    sed -i "1iJAVA_HOME=${JDK_HOME}" "$DAEMON_SH"
+fi
 
 # ---- version marker ----
 echo "${TOMCAT_MINOR}" > "${TC_PATH}/version.pl"

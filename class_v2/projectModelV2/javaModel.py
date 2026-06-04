@@ -293,13 +293,14 @@ class main(projectBase):
         @param get<dict_obj>
         @return string
         '''
-        ret = ["7", "8", "9", "10"]
+        ret = ["7", "8", "9", "10", "11"]
         default_path = "/usr/local/btjdk/jdk8/bin/java"
         ret2 = {
             'tomcat7': {'status': False, "jdk_path": default_path},
             'tomcat8': {'status': False, "jdk_path": default_path},
             'tomcat9': {'status': False, "jdk_path": default_path},
             'tomcat10': {'status': False, "jdk_path": default_path},
+            'tomcat11': {'status': False, "jdk_path": default_path},
         }
         rep_deemon_sh = re.compile(r"^JAVA_HOME=(?P<path>.*)\n", re.M)
         for i in ret:
@@ -324,8 +325,11 @@ class main(projectBase):
                     ret2["tomcat" + i]["tomcat_server"] = self.__tomcat9_server
                     ret2["tomcat" + i]["tomcat_start"] = self.__tomcat9_path + '/bin/daemon.sh'
                 elif i == '10':
-                    ret2["tomcat" + i]["tomcat_server"] = '/usr/local/bttomcat/tomcat10/conf/server.xml'
-                    ret2["tomcat" + i]["tomcat_start"] = "/usr/local/bttomcat/tomcat10/bin/daemon.sh"
+                    ret2["tomcat" + i]["tomcat_server"] = self.__tomcat10_server
+                    ret2["tomcat" + i]["tomcat_start"] = self.__tomcat10_path + '/bin/daemon.sh'
+                elif i == '11':
+                    ret2["tomcat" + i]["tomcat_server"] = self.__tomcat11_server
+                    ret2["tomcat" + i]["tomcat_start"] = self.__tomcat11_path + '/bin/daemon.sh'
         return ret2
     
     def get_tomcat_info(self, version):

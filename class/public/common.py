@@ -9174,6 +9174,11 @@ def run_plugin_v2(plugin_name: str, def_name: str, args: dict_obj):
 
 
 # 加载插件列表与授权列表
+def _empty_soft_list():
+    """Return valid empty soft list when cloud is unreachable"""
+    return {'list': [], 'total': 0, 'pages': 0}
+
+
 def load_soft_list(force: bool = True, retry_count: int = 0):
     local_cache_file = '{}/data/plugin_bin.pl'.format(get_panel_path())
 
@@ -9221,9 +9226,9 @@ def load_soft_list(force: bool = True, retry_count: int = 0):
         # 本地缓存都不存在，如果捕获到异常则将异常记录到错误日志，返回默认的软件列表数据
         if not update_ok:
             if ex is not None:
-                raise ex
+                return _empty_soft_list()
 
-            raise PanelError(get_msg_gettext('Load softlist and authorizations failed, please wait for few moment and try again.'))
+            return _empty_soft_list()
 
     import PluginLoader
 
@@ -9231,7 +9236,7 @@ def load_soft_list(force: bool = True, retry_count: int = 0):
         if force:
             if hasattr(PluginLoader, 'parse_plugin_list'):
                 if not PluginLoader.parse_plugin_list(1):
-                    raise PanelError('Sorry. failed to parse soft list. please try again later.')
+                    return _empty_soft_list()
             else:
                 import importlib
                 importlib.reload(PluginLoader)
@@ -9241,19 +9246,19 @@ def load_soft_list(force: bool = True, retry_count: int = 0):
         if retry_count < 6:
             # 获取软件列表失败，重试
             return load_soft_list(force, retry_count + 1)
-        raise
+        return _empty_soft_list()
 
     if not isinstance(plugin_list_data, dict):
         if retry_count < 6:
             # 获取软件列表失败，重试
             return load_soft_list(force, retry_count + 1)
-        raise PanelError('Sorry. failed to load soft list. please check the network and try again later.')
+        return _empty_soft_list()
 
     if 'status' in plugin_list_data and 'msg' in plugin_list_data and plugin_list_data['status'] == False:
         if retry_count < 6:
             # 获取软件列表失败，重试
             return load_soft_list(force, retry_count + 1)
-        raise PanelError(str(plugin_list_data['msg']))
+        return _empty_soft_list()
 
     return plugin_list_data
 

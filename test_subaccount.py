@@ -337,6 +337,9 @@ def test12_B_load_soft_list_fallback(target):
         test_result("load_soft_list API empty guard", has_guard)
     except Exception as e:
         test_result("load_soft_list fallback", False, str(e))
+
+
+def main():
     global PASS, FAIL, SKIP, PANEL_PYTHON
 
     target = None

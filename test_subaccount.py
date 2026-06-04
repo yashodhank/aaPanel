@@ -191,6 +191,48 @@ def test7_lifetime_patch(target):
             test_result("Lifetime patch in app.py", False, str(e))
 
 
+def test8_get_not_auth_status_v1(target):
+    """Test 8: config.py get_not_auth_status returns 200 (not 404)"""
+    config_path = os.path.join(target, "class", "config.py")
+    if not os.path.isfile(config_path):
+        test_result("get_not_auth_status (config.py)", False, "file not found", skipped=True)
+        return
+
+    try:
+        sys.path.insert(0, target)
+        sys.path.insert(0, os.path.join(target, "class"))
+        sys.path.insert(0, os.path.join(target, "class_v2"))
+        from config import config
+        c = config()
+        result = c.get_not_auth_status()
+        passed = result == 200
+        test_result("get_not_auth_status (config.py) -> {}".format(result), passed,
+                    "expected 200" if not passed else "")
+    except Exception as e:
+        test_result("get_not_auth_status (config.py)", False, str(e))
+
+
+def test9_get_not_auth_status_v2(target):
+    """Test 9: config_v2.py get_not_auth_status returns 200 (not 404)"""
+    config_path = os.path.join(target, "class_v2", "config_v2.py")
+    if not os.path.isfile(config_path):
+        test_result("get_not_auth_status (config_v2.py)", False, "file not found", skipped=True)
+        return
+
+    try:
+        sys.path.insert(0, target)
+        sys.path.insert(0, os.path.join(target, "class"))
+        sys.path.insert(0, os.path.join(target, "class_v2"))
+        import config_v2
+        c = config_v2.config()
+        result = c.get_not_auth_status()
+        passed = result == 200
+        test_result("get_not_auth_status (config_v2.py) -> {}".format(result), passed,
+                    "expected 200" if not passed else "")
+    except Exception as e:
+        test_result("get_not_auth_status (config_v2.py)", False, str(e))
+
+
 def main():
     global PASS, FAIL, SKIP
 
@@ -215,6 +257,9 @@ def main():
     test6_account_limit(target)
     print("--- Lifetime Patch ---")
     test7_lifetime_patch(target)
+    print("--- Auth Status Patch ---")
+    test8_get_not_auth_status_v1(target)
+    test9_get_not_auth_status_v2(target)
 
     print()
     total = PASS + FAIL + SKIP

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 aaPanel Pro License Bypass Verification Script
-Verifies all 13 pro bypass patches are correctly applied.
+Verifies all 17 pro bypass patches are correctly applied.
 
 Usage:
     python test_subaccount.py [/path/to/panel]

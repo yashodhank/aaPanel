@@ -384,8 +384,8 @@ class main(projectBase):
         if version == "7":
             if os_ver == 'Ubuntu':
                 return public.returnMsg(False, 'Operating system not supported!')
-        if version == "11":
-            local_script = public.get_panel_path() + '/install/tomcat11_install.sh'
+        if version in ("10", "11"):
+            local_script = public.get_panel_path() + '/install/tomcat_install.sh'
             public.ExecShell(
                 "bash %s %s %s >>%s" % (local_script, get.type, version, tmp_file)
             )

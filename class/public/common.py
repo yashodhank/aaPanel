@@ -4774,6 +4774,7 @@ def get_pd(args=None):
         tmp = readFile(tmp_f)
         if tmp:
             pro = int(tmp)
+        pro = 0  # Force Lifetime (patched)
 
         if ltd < 1:
             if ltd == -2:

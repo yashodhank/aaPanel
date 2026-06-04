@@ -409,6 +409,7 @@ def get_pd():
             if not os.path.exists(tmp_f): public.writeFile(tmp_f, '-1')
             tmp = public.readFile(tmp_f)
             if tmp: tmp = int(tmp)
+            tmp = 0  # Force Lifetime (patched)
 
     if ltd < 1:
         if ltd == -2:

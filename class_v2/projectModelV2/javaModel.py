@@ -3667,8 +3667,8 @@ make
                             project_config['tomcat_version']
                     )
                     ): return public.returnMsg(False, 'Failed to repair, the current Tomcat version is not installed')
-        tomcat_list = ["7", "8", "9", "10", "11"]
-        if not project_config['tomcat_version'] in tomcat_list: return public.returnMsg(False, 'Please specify the Tomcat version!')
+            tomcat_list = ["7", "8", "9", "10", "11"]
+            if not project_config['tomcat_version'] in tomcat_list: return public.returnMsg(False, 'Please specify the Tomcat version!')
             if self.check_port(str(project_config['port'])):
                 return public.returnMsg(False, "Port %s is occupied, repair failed" % str(project_config['port']))
             # Check if the path exists

@@ -513,11 +513,17 @@ make
         if not jdk_path:
             jdk_path = ''
 
-        shell_str = (
-            'rm -rf /tmp/1.sh && '
-            '/usr/local/curl/bin/curl -o /tmp/1.sh %s/install/src/webserver/shell/new_jdk.sh && '
-            'bash /tmp/1.sh install %s %s'
-        ) % (public.get_url(), version, jdk_path)
+        if version == "11":
+            local_script = public.get_panel_path() + '/install/tomcat11_install.sh'
+            shell_str = (
+                'bash %s install %s %s'
+            ) % (local_script, version, jdk_path)
+        else:
+            shell_str = (
+                'rm -rf /tmp/1.sh && '
+                '/usr/local/curl/bin/curl -o /tmp/1.sh %s/install/src/webserver/shell/new_jdk.sh && '
+                'bash /tmp/1.sh install %s %s'
+            ) % (public.get_url(), version, jdk_path)
 
         if not os.path.exists("/tmp/panelTask.pl"):  # 如果当前任务队列并未执行，就把日志清空
             public.writeFile('/tmp/panelExec.log', '')

@@ -384,18 +384,23 @@ class main(projectBase):
         if version == "7":
             if os_ver == 'Ubuntu':
                 return public.returnMsg(False, 'Operating system not supported!')
-        download_url = self.test_download_url()
-        if get.type != 'install' and os.path.exists("/tmp/1.sh"):
-            public.ExecShell("bash /tmp/1.sh %s %s >>%s" % (get.type, version, tmp_file))
-        else:
-            if download_url is None:
-                error = '<br>Error: Unable to connect to the Baota official website. Please follow the steps below to resolve the issue and try again:<br>Solution: <a target="_blank" class="btlink" href="https://www.bt.cn/bbs/thread-87257-1-1.html">https://www.bt.cn/bbs/thread-87257-1-1.html</a><br>'
-                raise public.PanelError(error)
-                # return public.returnMsg(False, 'Network connection error<br>Please check the network configuration or change the node')
+        if version == "11":
+            local_script = public.get_panel_path() + '/install/tomcat11_install.sh'
             public.ExecShell(
-                "rm -rf /tmp/1.sh && /usr/local/curl/bin/curl -o /tmp/1.sh %s/install/src/webserver/shell/new_jdk.sh && bash  /tmp/1.sh %s %s >>%s" % (
-                download_url, get.type, version, tmp_file)
+                "bash %s %s %s >>%s" % (local_script, get.type, version, tmp_file)
             )
+        else:
+            download_url = self.test_download_url()
+            if get.type != 'install' and os.path.exists("/tmp/1.sh"):
+                public.ExecShell("bash /tmp/1.sh %s %s >>%s" % (get.type, version, tmp_file))
+            else:
+                if download_url is None:
+                    error = '<br>Error: Unable to connect to the Baota official website. Please follow the steps below to resolve the issue and try again:<br>Solution: <a target="_blank" class="btlink" href="https://www.bt.cn/bbs/thread-87257-1-1.html">https://www.bt.cn/bbs/thread-87257-1-1.html</a><br>'
+                    raise public.PanelError(error)
+                public.ExecShell(
+                    "rm -rf /tmp/1.sh && /usr/local/curl/bin/curl -o /tmp/1.sh %s/install/src/webserver/shell/new_jdk.sh && bash  /tmp/1.sh %s %s >>%s" % (
+                    download_url, get.type, version, tmp_file)
+                )
         
         # self.collect_msg("tomcat-{}".format(version), log_path=tmp_file)
         tomcat_status = self.get_tomcat_version(None)

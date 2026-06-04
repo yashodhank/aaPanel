@@ -2494,7 +2494,7 @@ class config:
             status_code = int(public.read_config('abort'))
             return status_code
         except:
-            return 404
+            return 200
 
     def get_request_iptype(self,get = None):
         '''

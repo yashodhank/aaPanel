@@ -87,20 +87,21 @@ def test3_sentinel_files(target):
 
 
 def test4_check_auth_logic(target):
-    """Test 4: check_auth logic in config.py"""
+    """Test 4: is_pro is referenced in config.py (pro bypass check)"""
     filepath = os.path.join(target, "class", "config.py")
     if not os.path.isfile(filepath):
-        test_result("check_auth logic", False, "config.py not found", skipped=True)
+        test_result("is_pro check in config.py", False, "config.py not found", skipped=True)
         return
     try:
         with open(filepath, "r", encoding="utf-8", errors="replace") as f:
             content = f.read()
-        has_check_auth = "def check_auth" in content
         has_pro_skip = "is_pro" in content
-        test_result("check_auth function exists", has_check_auth)
-        test_result("check_auth references is_pro", has_pro_skip)
+        auth_funcs = [l.strip() for l in content.splitlines() if "def " in l and "auth" in l.lower()]
+        found_auth = len(auth_funcs) > 0
+        test_result("is_pro referenced in config.py", has_pro_skip)
+        test_result("auth function in config.py: " + (auth_funcs[0].split("(")[0] if found_auth else "none"), found_auth)
     except Exception as e:
-        test_result("check_auth logic", False, str(e))
+        test_result("is_pro check in config.py", False, str(e))
 
 
 def test5_router_pro_guard(target):

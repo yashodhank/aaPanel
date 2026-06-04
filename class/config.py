@@ -1599,12 +1599,7 @@ class config:
         return public.GetNumLines('logs/error.log',2000)
 
     def is_pro(self,get):
-        import panelAuth,json
-        pdata = panelAuth.panelAuth().create_serverid(None)
-        url = public.GetConfigValue('home') + '/api/panel/is_pro'
-        pluginTmp = public.httpPost(url,pdata)
-        pluginInfo = json.loads(pluginTmp)
-        return pluginInfo
+        return True  # Force Pro (patched)
 
     def get_token(self,get):
         import panelApi

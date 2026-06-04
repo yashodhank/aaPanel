@@ -3085,7 +3085,7 @@ make
             get.bind_extranet = 1
         else:
             get.bind_extranet = 1
-        tomcat_list = ["7", "8", "9"]
+        tomcat_list = ["7", "8", "9", "10", "11"]
         if not tomcat_version in tomcat_list: return public.returnMsg(False, 'Please specify the Tomcat version!')
         if int(port) < 1 or int(port) > 65535: return public.returnMsg(False, 'Invalid port range')
         if self.check_port(port): return public.returnMsg(False, "Port is occupied, please use another port")
@@ -3122,6 +3122,22 @@ make
             public.ExecShell(
                 'cp -r %s/* %s && chown -R www:www %s' % (
                 self.__tomcat9_path_bak, self.__site_path + domain, self.__site_path + domain)
+                )
+        if tomcat_version == 'tomcat10' or tomcat_version == '10':
+            if not os.path.exists(self.__tomcat10_path_bak + '/conf/server.xml'): return public.returnMsg(
+                False, "Tomcat10 configuration file does not exist, please reinstall Tomcat10"
+                )
+            public.ExecShell(
+                'cp -r %s/* %s && chown -R www:www %s' % (
+                self.__tomcat10_path_bak, self.__site_path + domain, self.__site_path + domain)
+                )
+        if tomcat_version == 'tomcat11' or tomcat_version == '11':
+            if not os.path.exists(self.__tomcat11_path_bak + '/conf/server.xml'): return public.returnMsg(
+                False, "Tomcat11 configuration file does not exist, please reinstall Tomcat11"
+                )
+            public.ExecShell(
+                'cp -r %s/* %s && chown -R www:www %s' % (
+                self.__tomcat11_path_bak, self.__site_path + domain, self.__site_path + domain)
                 )
         # server.xml
         if os.path.exists(self.__site_path + domain + '/conf/server.xml'):

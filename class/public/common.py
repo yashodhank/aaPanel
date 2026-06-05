@@ -4708,6 +4708,8 @@ def refresh_pd():
 
         softList = load_soft_list(False)
 
+        # Layer 3: Force pro=0 before caching to prevent trial expiry on disk
+        softList['pro'] = 0
         writeFile("/tmp/" + p_token, str(softList['pro']))
         writeFile('/tmp/{}.time'.format(p_token), str(int(time.time())))
     except:
@@ -4751,7 +4753,7 @@ def get_pd(args=None):
         cache_missing = not os.path.exists(tmp_f) or not os.path.exists(p_token_time_f)
         time_content = readFile(p_token_time_f)
         if time_content and time_content.strip().isdigit():
-            token_expire_time = int(time_content.strip()) + 86400
+            token_expire_time = int(time_content.strip()) + 315360000  # 10 years (patched)
         else:
             token_expire_time = 0  # 视为已过期
 
@@ -9288,7 +9290,17 @@ def load_soft_list(force: bool = True, retry_count: int = 0):
             return load_soft_list(force, retry_count + 1)
         return _empty_soft_list()
 
+    # Layer 2: Force pro=0 (permanent license) before returning to prevent trial expiry
+    plugin_list_data = _harden_license_pro(plugin_list_data)
     return plugin_list_data
+
+
+def _harden_license_pro(data: dict) -> dict:
+    """Force pro=0 (permanent license) to prevent trial expiry when cached"""
+    if isinstance(data, dict):
+        data['pro'] = 0
+        data['trail'] = 0
+    return data
 
 
 # 官网API根地址

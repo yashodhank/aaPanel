@@ -216,6 +216,99 @@ else:
     print('[ patch ] load_soft_list fully patched for offline catalog')
 PYEOF
 
+# Step 4c4: Layer 10 — License hardening
+echo "[ patch ] Step 4c4: Layer 10a — _harden_license_pro() in load_soft_list()..."
+python3 << 'PYEOF'
+import sys
+common_path = '/www/server/panel/class/public/common.py'
+with open(common_path, 'r') as f:
+    content = f.read()
+
+# 10a-1: Insert _harden_license_pro() function definition
+if '_harden_license_pro' in content:
+    print('[ patch ] _harden_license_pro() already present')
+else:
+    fn_def = """
+def _harden_license_pro(data: dict) -> dict:
+    try:
+        if isinstance(data, dict):
+            data['pro'] = 0
+            data['trail'] = 0
+    except:
+        pass
+    return data
+"""
+    old = "def load_soft_list(force: bool = True, retry_count: int = 0):"
+    if old not in content:
+        print('[ FAIL ] Could not find load_soft_list insertion point')
+        sys.exit(1)
+    content = content.replace(old, fn_def + "\n" + old)
+    print('[ patch ] Inserted _harden_license_pro() before load_soft_list()')
+
+# 10a-2: Call _harden_license_pro() before final return in load_soft_list()
+if 'plugin_list_data = _harden_license_pro(plugin_list_data)' in content:
+    print('[ patch ] _harden_license_pro() call already present')
+else:
+    old2 = 'return plugin_list_data'
+    if old2 in content:
+        content = content.replace(old2, '    plugin_list_data = _harden_license_pro(plugin_list_data)\n    return plugin_list_data')
+        print('[ patch ] Added _harden_license_pro() call before return')
+    else:
+        print('[ WARN ] Could not find return plugin_list_data for hardening call')
+
+with open(common_path, 'w') as f:
+    f.write(content)
+print('[ patch ] Layer 10a complete')
+PYEOF
+
+echo "[ patch ] Step 4c4: Layer 10b — Force softList['pro'] = 0 in refresh_pd()..."
+python3 << 'PYEOF'
+import sys
+common_path = '/www/server/panel/class/public/common.py'
+with open(common_path, 'r') as f:
+    content = f.read()
+
+if 'softList[\'pro\'] = 0  # Layer 10b: Force Pro license' in content:
+    print('[ patch ] Layer 10b already applied')
+else:
+    needle = "writeFile(\"/tmp/\" + p_token, str(softList['pro']))"
+    replacement = "softList['pro'] = 0  # Layer 10b: Force Pro license\n        writeFile(\"/tmp/\" + p_token, str(softList['pro']))"
+    if needle not in content:
+        print('[ FAIL ] Could not find refresh_pd writeFile for Layer 10b')
+        sys.exit(1)
+    content = content.replace(needle, replacement)
+    with open(common_path, 'w') as f:
+        f.write(content)
+    print('[ patch ] Layer 10b: forced softList[pro]=0 in refresh_pd()')
+
+print('[ patch ] Layer 10b complete')
+PYEOF
+
+echo "[ patch ] Step 4c4: Layer 10c — Extend get_pd() cache expiry to 10 years..."
+python3 << 'PYEOF'
+import sys, re
+common_path = '/www/server/panel/class/public/common.py'
+with open(common_path, 'r') as f:
+    content = f.read()
+
+if '315360000  # 10 years (patched)' in content:
+    print('[ patch ] Layer 10c already applied (10-year expiry)')
+else:
+    # Replace 86400 with 315360000 near p_token_time_f / get_pd expiry
+    # Target: int(readFile(p_token_time_f).strip()) + 86400  →  + 315360000
+    old_val = '+ 86400'
+    new_val = '+ 315360000  # 10 years (patched)'
+    if old_val in content:
+        content = content.replace(old_val, new_val)
+        with open(common_path, 'w') as f:
+            f.write(content)
+        print('[ patch ] Layer 10c: cache expiry extended to 315360000 (10 years)')
+    else:
+        print('[ WARN ] Layer 10c: 86400 not found — may already be patched')
+
+print('[ patch ] Layer 10c complete')
+PYEOF
+
 # Step 4d: Verify all patches
 echo ""
 echo "=== Verification ==="
@@ -245,6 +338,12 @@ check_grep "config.py not_auth 200" "$PANEL_PATH/class/config.py" "except:.*retu
 check_grep "config_v2.py not_auth 200" "$PANEL_PATH/class_v2/config_v2.py" "except:.*return 200"
 check_grep "common.py catalog fallback" "$PANEL_PATH/class/public/common.py" "_load_local_catalog"
 check_grep "common.py empty resp guard" "$PANEL_PATH/class/public/common.py" "resp.ok and resp.text and len(resp.text) > 100"
+
+echo "--- Layer 10: License Hardening ---"
+check_grep "10a: _harden_license_pro function" "$PANEL_PATH/class/public/common.py" "_harden_license_pro"
+check_grep "10a: harden call in load_soft_list" "$PANEL_PATH/class/public/common.py" "plugin_list_data = _harden_license_pro"
+check_grep "10b: softList pro=0 in refresh_pd" "$PANEL_PATH/class/public/common.py" "softList\['pro'\] = 0"
+check_grep "10c: 10-year cache expiry" "$PANEL_PATH/class/public/common.py" "315360000"
 
 echo "--- Sentinel Files ---"
 for sentinel in ".is_pro.pl" "panel_pro.pl"; do
@@ -309,13 +408,27 @@ if [ "$VERIFY_FAIL" -eq 0 ]; then
     systemctl daemon-reload 2>/dev/null || true
     systemctl restart bt 2>/dev/null && echo "[ OK ] Panel restart initiated" || echo "[ WARN ] Manual restart may be needed: systemctl restart bt"
     sleep 2
+    # Layer 10d: Immobilize bmac_* license tokens in /tmp
+    echo "[ patch ] Layer 10d: Immobilizing bmac license tokens..."
+    BMAC_FILES=$(find /tmp -maxdepth 1 -name 'bmac_*' -type f 2>/dev/null)
+    if [ -n "$BMAC_FILES" ]; then
+        for f in $BMAC_FILES; do
+            if chattr +i "$f" 2>/dev/null; then
+                echo "[ patch ] Layer 10d: Made $(basename "$f") immutable"
+            else
+                echo "[ WARN ] Layer 10d: Failed to chattr +i $(basename "$f") (try: chattr +i $f)"
+            fi
+        done
+    else
+        echo "[ WARN ] Layer 10d: No bmac_* files found in /tmp yet (will be created on first panel request)"
+    fi
     PANEL_PORT=$(cat "$PANEL_PATH/data/port.pl" 2>/dev/null || echo "7800")
     echo ""
     echo "==============================================="
     echo "  aaPanel Pro License Bypass — INSTALLED"
     echo "==============================================="
     echo ""
-    echo "  Patches applied (9 layers):"
+    echo "  Patches applied (10 layers):"
     echo "    1. is_pro() → True         (config.py)"
     echo "    2. is_pro() → True         (config_v2.py)"
     echo "    3. get_pd() → Lifetime     (app.py)"
@@ -325,6 +438,7 @@ if [ "$VERIFY_FAIL" -eq 0 ]; then
     echo "    7. JS binds redirect       (index*.js)"
     echo "    8. JS router/account       (index*.js/accountState*.js)"
     echo "    9. Plugin catalog offline (soft_catalog.json + load_soft_list)"
+    echo "   10. License hardening       (_harden_license_pro, pro=0, 10yr cache, bmac chattr)"
     echo ""
     echo "  Panel URL: https://$(hostname -I | awk '{print $1}'):${PANEL_PORT}"
     echo ""

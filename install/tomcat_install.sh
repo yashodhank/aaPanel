@@ -176,6 +176,23 @@ if grep -q "^JAVA_HOME=" "$DAEMON_SH" 2>/dev/null; then
 else
     sed -i "2iJAVA_HOME=${JDK_HOME}" "$DAEMON_SH"
 fi
+# Use www user instead of tomcat (may not exist)
+sed -i 's/TOMCAT_USER=tomcat/TOMCAT_USER=www/' "$DAEMON_SH"
+
+# ---- build jsvc from commons-daemon ----
+COMMONS_DAEMON="${TC_PATH}/bin/commons-daemon-native.tar.gz"
+if [ -f "$COMMONS_DAEMON" ]; then
+    echo "Building jsvc..."
+    BUILD_DIR="/tmp/tomcat${VERSION}_jsvc_$$"
+    mkdir -p "$BUILD_DIR"
+    tar xzf "$COMMONS_DAEMON" -C "$BUILD_DIR"
+    cd "$BUILD_DIR"/commons-daemon-*-native-src/unix 2>/dev/null || true
+    if [ -f configure ]; then
+        ./configure --with-java="$JDK_HOME" 2>/dev/null
+        make 2>/dev/null && cp jsvc "$TC_PATH/bin/" && echo "jsvc built" || echo "WARNING: jsvc build failed, using catalina.sh"
+    fi
+    rm -rf "$BUILD_DIR"
+fi
 
 # ---- version marker ----
 echo "${TOMCAT_MINOR}" > "${TC_PATH}/version.pl"

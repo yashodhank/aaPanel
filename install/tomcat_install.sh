@@ -174,7 +174,7 @@ DAEMON_SH="${TC_PATH}/bin/daemon.sh"
 if grep -q "^JAVA_HOME=" "$DAEMON_SH" 2>/dev/null; then
     sed -i "s|^JAVA_HOME=.*|JAVA_HOME=${JDK_HOME}|" "$DAEMON_SH"
 else
-    sed -i "1iJAVA_HOME=${JDK_HOME}" "$DAEMON_SH"
+    sed -i "2iJAVA_HOME=${JDK_HOME}" "$DAEMON_SH"
 fi
 
 # ---- version marker ----

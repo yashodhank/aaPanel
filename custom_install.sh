@@ -401,6 +401,22 @@ else
     VERIFY_FAIL=1
 fi
 check_grep "load_soft_list offline fallback" "$PANEL_PATH/class/public/common.py" "_load_local_catalog"
+
+# =============================================
+# Layer 11: Adaptive Guard + Watchdog
+# =============================================
+if [ -f "${REPO_PATH}/aaPanel_harden.py" ] && [ -x "${PANEL_PYTHON}" ]; then
+    log "Step 11: Running adaptive patcher..."
+    cp "${REPO_PATH}/aaPanel_harden.py" "${PANEL_PATH}/" 2>/dev/null || true
+    ${PANEL_PYTHON} "${PANEL_PATH}/aaPanel_harden.py" "${PANEL_PATH}" 2>&1 || warn "Adaptive patcher had errors"
+fi
+
+if [ -f "${REPO_PATH}/watchdog.py" ]; then
+    cp "${REPO_PATH}/watchdog.py" "${PANEL_PATH}/" 2>/dev/null || true
+    nohup python3 -u "${PANEL_PATH}/watchdog.py" >> "${PANEL_PATH}/watchdog.log" 2>&1 &
+    log "Watchdog started (PID: $!)"
+fi
+
 if [ "$VERIFY_FAIL" -eq 0 ]; then
     echo "=== All patches applied successfully! ==="
     echo ""
@@ -439,6 +455,7 @@ if [ "$VERIFY_FAIL" -eq 0 ]; then
     echo "    8. JS router/account       (index*.js/accountState*.js)"
     echo "    9. Plugin catalog offline (soft_catalog.json + load_soft_list)"
     echo "   10. License hardening       (_harden_license_pro, pro=0, 10yr cache, bmac chattr)"
+    echo "   11. Adaptive guard          (sitecustomize.py + PluginLoader runtime patch)"
     echo ""
     echo "  Panel URL: https://$(hostname -I | awk '{print $1}'):${PANEL_PORT}"
     echo ""

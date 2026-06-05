@@ -177,41 +177,37 @@ class AdaptiveHardener:
         ok("Cleared __pycache__")
 
     def _patch_file(self, label, function_patches):
-        """Generic adaptive file patcher using introspection"""
+        """Adaptive patcher — collects all injection points, applies in reverse
+        absolute line order to preserve line numbers during multi-patch insertion."""
         filepath = self.files[label]
-        content = open(filepath).read()
-        original = content
-        
+        original = open(filepath).read()
+        lines = original.split(chr(10))
+        all_patches = []
         for func_name, inject_points in function_patches:
-            lines = content.split('\n')
-            # Find function in file
+            if not inject_points:
+                continue
             func_start = None
             for i, line in enumerate(lines):
-                if f'def {func_name}' in line:
+                if "def " + func_name in line and "(" in line:
                     func_start = i
                     break
-            
             if func_start is None:
                 continue
-            
-            # Apply injections (process in reverse to preserve line numbers)
-            for op, line_num, new_line in sorted(inject_points, key=lambda x: x[1], reverse=True):
-                abs_line = func_start + line_num
-                if op == 'after':
-                    lines.insert(abs_line + 1, new_line)
-                elif op == 'before':
-                    lines.insert(abs_line, new_line)
-                elif op == 'replace':
-                    lines[abs_line] = new_line
-            
-            content = '\n'.join(lines)
-        
-        if content != original:
-            open(filepath, 'w').write(content)
-            ok(f"Patched {label} ({len(content) - len(original)} bytes diff)")
+            for op, rel_line, new_line in inject_points:
+                all_patches.append((func_start + rel_line, op, new_line))
+        for abs_line, op, new_line in sorted(all_patches, key=lambda x: x[0], reverse=True):
+            if op == "after":
+                lines.insert(abs_line + 1, new_line)
+            elif op == "before":
+                lines.insert(abs_line, new_line)
+            elif op == "replace":
+                lines[abs_line] = new_line
+        new_content = chr(10).join(lines)
+        if new_content != original:
+            open(filepath, "w").write(new_content)
+            ok(f"Patched {label} ({len(new_content) - len(original)} bytes diff)")
         else:
             ok(f"{label}: no changes needed (already patched)")
-
     def _patch_is_pro(self, label):
         filepath = self.files[label]
         content = open(filepath).read()
@@ -279,7 +275,7 @@ _orig_import = builtins.__import__
 
 def _intercept(name, *a, **kw):
     mod = _orig_import(name, *a, **kw)
-    if name == "BTPanel":
+    if name == "PluginLoader":
         try:
             import PluginLoader as _pl
             _get = _pl.get_plugin_list

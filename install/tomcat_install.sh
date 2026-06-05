@@ -34,7 +34,8 @@ TOMCAT_DIR="apache-tomcat-${TOMCAT_MINOR}"
 TOMCAT_TGZ="${TOMCAT_DIR}.tar.gz"
 TC_PATH="/www/server/tomcat${VERSION}"
 BAK_PATH="/www/server/tomcat_bak${VERSION}"
-INIT_SCRIPT="/etc/init.d/bttomcat${VERSION}"
+INIT_SCRIPT="/etc/init.d/tomcat${VERSION}"
+BTT_INIT_SCRIPT="/etc/init.d/bttomcat${VERSION}"
 BTT_LINK="/usr/local/bttomcat/tomcat${VERSION}"
 BTT_BAK_LINK="/usr/local/bttomcat/tomcat_bak${VERSION}"
 MIRROR_BASE="https://dlcdn.apache.org/tomcat/tomcat-${TOMCAT_MAJOR}/v${TOMCAT_MINOR}/bin"
@@ -44,7 +45,7 @@ if [ "$ACTION" = "uninstall" ]; then
     echo "Stopping Tomcat ${VERSION}..."
     [ -x "$INIT_SCRIPT" ] && "$INIT_SCRIPT" stop 2>/dev/null || true
     rm -rf "$TC_PATH" "$BAK_PATH" "$BTT_LINK" "$BTT_BAK_LINK" || true
-    rm -f "$INIT_SCRIPT" || true
+    rm -f "$INIT_SCRIPT" "$BTT_INIT_SCRIPT" || true
     echo "Tomcat ${VERSION} uninstalled."
     echo "NOTE: JDK at /usr/local/btjdk/ was not removed (may be shared)."
     exit 0
@@ -196,6 +197,7 @@ case "\$1" in
 esac
 INITEOF
 chmod +x "$INIT_SCRIPT"
+ln -sfn "$INIT_SCRIPT" "$BTT_INIT_SCRIPT"
 
 # ---- cleanup ----
 rm -rf "$TMP_DIR"

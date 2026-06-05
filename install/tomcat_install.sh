@@ -16,12 +16,12 @@ JDK_PATH="${3:-}"
 case "$VERSION" in
     10)
         TOMCAT_MAJOR=10
-        TOMCAT_MINOR="10.1.40"
+        TOMCAT_MINOR="10.1.55"
         MIN_JDK=11
         ;;
     11)
         TOMCAT_MAJOR=11
-        TOMCAT_MINOR="11.0.5"
+        TOMCAT_MINOR="11.0.22"
         MIN_JDK=17
         ;;
     *)
@@ -93,9 +93,17 @@ resolve_jdk() {
 JDK_HOME=$(resolve_jdk) || true
 
 if [ -z "$JDK_HOME" ]; then
-    echo "No JDK found. Installing OpenJDK 17..."
-    JDK_TGZ="OpenJDK17U-jdk_x64_linux_hotspot_17.0.15_10.tar.gz"
-    JDK_URL="https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.15%2B10/${JDK_TGZ}"
+    echo "Fetching latest OpenJDK 17 from Adoptium..."
+    # Use Adoptium API to get the latest download URL (avoids hardcoded version)
+    JDK_URL=$(curl -fsSL --connect-timeout 15 --retry 2 \
+        "https://api.adoptium.net/v3/assets/latest/17/hotspot?architecture=x64&image_type=jdk&os=linux" 2>/dev/null \
+        | python3 -c "import json,sys;d=json.load(sys.stdin);print(d[0]['binary']['package']['link'])" 2>/dev/null || echo "")
+    if [ -z "$JDK_URL" ]; then
+        echo "Adoptium API failed, trying direct download..."
+        JDK_URL="https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.19%2B10/OpenJDK17U-jdk_x64_linux_hotspot_17.0.19_10.tar.gz"
+    fi
+    JDK_TGZ=$(basename "$JDK_URL" | sed 's/%2B/+/g')
+    echo "Downloading JDK from $JDK_URL..."
 
     mkdir -p /usr/local/btjdk
     TMP_JDK="/tmp/jdk17_install_$$"
@@ -109,6 +117,7 @@ if [ -z "$JDK_HOME" ]; then
         exit 1
     }
 
+    mkdir -p /usr/local/btjdk/jdk17
     tar -xzf "$JDK_TGZ" --strip-components=1 -C /usr/local/btjdk/jdk17
     rm -rf "$TMP_JDK"
     JDK_HOME="/usr/local/btjdk/jdk17"
@@ -116,7 +125,8 @@ if [ -z "$JDK_HOME" ]; then
 fi
 
 # Verify JDK meets version requirement
-JAVA_VER=$("$JDK_HOME/bin/java" -version 2>&1 | head -1 | grep -oP '\d+' | head -1 || echo 0)
+JAVA_VER=$("$JDK_HOME/bin/java" -version 2>&1 | head -1 | sed 's/.*version "\([0-9]*\).*/\1/' || echo 0)
+JAVA_VER=${JAVA_VER:-0}
 if [ "$JAVA_VER" -lt "$MIN_JDK" ]; then
     echo "ERROR: JDK at $JDK_HOME is Java $JAVA_VER (requires $MIN_JDK+)"
     echo "       Specify a newer JDK with: $0 install $VERSION /path/to/jdk"

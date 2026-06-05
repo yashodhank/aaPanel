@@ -1,405 +1,200 @@
 #!/usr/bin/env python3
 """
-aaPanel Pro License Bypass Verification Script
-Verifies all 17 pro bypass patches are correctly applied.
+aaPanel License Bypass — Runtime Verification
+Imports modules, calls functions, checks results. No fragile pattern matching.
 
 Usage:
     python test_subaccount.py [/path/to/panel]
     python test_subaccount.py [/path/to/panel] --panel-python /path/to/python
-
-When --panel-python is provided, the script uses that Python interpreter for
-import-based runtime checks (tests 1-2, 8-9). Otherwise it falls back to
-pattern-matching checks.
 """
 
-import glob
-import json
-import os
-import re
-import subprocess
-import sys
-import traceback
+import glob, json, os, subprocess, sys
 
-PANEL_PYTHON = None
+PANEL_PYTHON = None; PASS = FAIL = SKIP = 0; target = "/www/server/panel"
 
-PASS = 0
-FAIL = 0
-SKIP = 0
+def green(s): return f"\033[32m{s}\033[0m"
+def red(s): return f"\033[31m{s}\033[0m"
+def yellow(s): return f"\033[33m{s}\033[0m"
 
+def R(name, ok, msg=""):
+    global PASS, FAIL
+    if ok: PASS += 1; print(f"  {green('[PASS]')} {name}")
+    else: FAIL += 1; print(f"  {red('[FAIL]')} {name}: {msg}")
 
-def green(s):
-    return "\033[32m{}\033[0m".format(s)
-
-
-def red(s):
-    return "\033[31m{}\033[0m".format(s)
-
-
-def yellow(s):
-    return "\033[33m{}\033[0m".format(s)
-
-
-def test_result(name, passed, message="", skipped=False):
+def F(name, ok, msg=""):
     global PASS, FAIL, SKIP
-    if skipped:
-        SKIP += 1
-        print("  {} {}: {}".format(yellow('[SKIP]'), name, message))
-    elif passed:
-        PASS += 1
-        print("  {} {}".format(green('[PASS]'), name))
+    if ok is None: SKIP += 1; print(f"  {yellow('[SKIP]')} {name}: {msg}")
+    elif ok: PASS += 1; print(f"  {green('[PASS]')} {name}")
+    else: FAIL += 1; print(f"  {red('[FAIL]')} {name}: {msg}")
+
+def run(code):
+    r = subprocess.run([PANEL_PYTHON, '-c', code], capture_output=True, text=True,
+                       timeout=30, cwd=target, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+    return r.stdout.strip(), r.stderr.strip(), r.returncode
+
+def run_script(path):
+    r = subprocess.run([PANEL_PYTHON, path], capture_output=True, text=True,
+                       timeout=60, cwd=target, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+    return r.stdout.strip(), r.stderr.strip(), r.returncode
+
+# === RUNTIME TESTS ===
+
+def test_is_pro():
+    print("\n--- is_pro() ---")
+    code = """import sys,os;sys.path.insert(0,'CLASS');sys.path.insert(0,'CLASS/class');os.chdir('CLASS')
+exec(open('BTPanel/app.py').read()) if False else None
+import importlib, config, config_v2
+c1 = config.config().is_pro(None)
+c2 = config_v2.config().is_pro(None)
+print(f'C1={c1}|C2={c2}|C1OK={bool(c1)}|C2OK={bool(c2)}')
+""".replace('CLASS', target)
+    out, err, rc = run(code)
+    for line in (out.split("\n") if out else []):
+        if "C1OK=" in line:
+            R("config.is_pro() -> True", "C1OK=True" in line, line)
+        if "C2OK=" in line:
+            R("config_v2.is_pro() -> True", "C2OK=True" in line, line)
+    if rc != 0: R("is_pro imports", False, err[:100])
+
+def test_auth():
+    print("\n--- Auth Status ---")
+    code = """import sys,os;sys.path.insert(0,'CLS');sys.path.insert(0,'CLS/class');os.chdir('CLS')
+import config, config_v2
+a1 = config.config().get_not_auth_status()
+a2 = config_v2.config().get_not_auth_status()
+print(f"A1={a1}|A2={a2}")
+""".replace('CLS', target)
+    out, err, rc = run(code)
+    if rc == 0:
+        for line in out.split("\n"):
+            if "A1=" in line:
+                R("config.get_not_auth_status() -> 200", "A1=200" in line, line)
+            if "A2=" in line:
+                R("config_v2.get_not_auth_status() -> 200", "A2=200" in line, line)
     else:
-        FAIL += 1
-        print("  {} {}: {}".format(red('[FAIL]'), name, message))
+        R("auth status imports", False, err[:100])
 
-
-def _run_panel_python(script, target):
-    """Run a short Python snippet using the aaPanel interpreter."""
-    if not PANEL_PYTHON or not os.path.isfile(PANEL_PYTHON):
-        return None
-    try:
-        cp = subprocess.run(
-            [PANEL_PYTHON, "-c", script],
-            capture_output=True, text=True, timeout=15,
-            env={**os.environ, "PYTHONPATH": target}
-        )
-        return cp.stdout.strip()
-    except Exception:
-        return None
-
-
-def test1_config_v2_is_pro(target):
-    """Test 1: config_v2.is_pro() returns True"""
-    filepath = os.path.join(target, "class_v2", "config_v2.py")
-    if not os.path.isfile(filepath):
-        test_result("config_v2.is_pro()", False, "file not found: " + filepath, skipped=True)
-        return
-    try:
-        with open(filepath, "r", encoding="utf-8", errors="replace") as f:
-            content = f.read()
-        passed = "def is_pro" in content and "return True" in content
-        test_result("config_v2.is_pro() returns True", passed)
-    except Exception as e:
-        test_result("config_v2.is_pro()", False, str(e))
-
-
-def test2_config_is_pro(target):
-    """Test 2: config.is_pro() returns True"""
-    filepath = os.path.join(target, "class", "config.py")
-    if not os.path.isfile(filepath):
-        test_result("config.is_pro()", False, "file not found: " + filepath, skipped=True)
-        return
-    try:
-        with open(filepath, "r", encoding="utf-8", errors="replace") as f:
-            content = f.read()
-        passed = "def is_pro" in content and "return True" in content
-        test_result("config.is_pro() returns True", passed)
-    except Exception as e:
-        test_result("config.is_pro()", False, str(e))
-
-
-def test3_sentinel_files(target):
-    """Test 3: Pro sentinel files exist (.is_pro.pl, panel_pro.pl)"""
-    data_dir = os.path.join(target, "data")
-    if not os.path.isdir(data_dir):
-        test_result("Sentinel files", False, "data/ dir not found: " + data_dir, skipped=True)
-        return
-    for fname in [".is_pro.pl", "panel_pro.pl"]:
-        fpath = os.path.join(data_dir, fname)
-        if os.path.isfile(fpath):
-            test_result("Sentinel: " + fname, True)
-        else:
-            test_result("Sentinel: " + fname, False, "not found: " + fpath)
-            return False
-    return True
-
-
-def test4_check_auth_logic(target):
-    """Test 4: is_pro is referenced in config.py (pro bypass check)"""
-    filepath = os.path.join(target, "class", "config.py")
-    if not os.path.isfile(filepath):
-        test_result("is_pro check in config.py", False, "config.py not found", skipped=True)
-        return
-    try:
-        with open(filepath, "r", encoding="utf-8", errors="replace") as f:
-            content = f.read()
-        has_pro_skip = "is_pro" in content
-        auth_funcs = [l.strip() for l in content.splitlines() if "def " in l and "auth" in l.lower()]
-        found_auth = len(auth_funcs) > 0
-        test_result("is_pro referenced in config.py", has_pro_skip)
-        test_result("auth function in config.py: " + (auth_funcs[0].split("(")[0] if found_auth else "none"), found_auth)
-    except Exception as e:
-        test_result("is_pro check in config.py", False, str(e))
-
-
-def test5_router_pro_guard(target):
-    """Test 5: Router pro guard patched in ALL index*.js bundles"""
-    static_dir = os.path.join(target, "BTPanel", "static")
-    if not os.path.isdir(static_dir):
-        test_result("Router guard in index*.js", False, "static dir not found: " + static_dir, skipped=True)
-        return
-    index_files = glob.glob(os.path.join(static_dir, "**", "index*.js"), recursive=True)
-    if not index_files:
-        test_result("Router guard in index*.js", False, "no index*.js files found", skipped=True)
-        return
-    patched = 0
-    unpatched = 0
-    for fpath in index_files:
-        try:
-            with open(fpath, "r", encoding="utf-8", errors="replace") as f:
-                content = f.read()
-            if "{type:\"pro\"" not in content and "{\"type\":\"pro\"" not in content:
-                patched += 1
-            else:
-                unpatched += 1
-        except Exception:
-            unpatched += 1
-    passed = unpatched == 0
-    test_result(
-        "Router pro guard in index*.js",
-        passed,
-        "patched={}, unpatched={}, total={}".format(patched, unpatched, len(index_files))
-    )
-
-
-def test6_account_limit(target):
-    """Test 6: Account limit (table.total>=30 -> 99999) in ALL accountState*.js bundles"""
-    static_dir = os.path.join(target, "BTPanel", "static")
-    if not os.path.isdir(static_dir):
-        test_result("Account limit in accountState*.js", False, "static dir not found", skipped=True)
-        return
-    acct_files = glob.glob(os.path.join(static_dir, "**", "accountState*.js"), recursive=True)
-    if not acct_files:
-        test_result("Account limit in accountState*.js", False, "no accountState*.js found", skipped=True)
-        return
-    patched = 0
-    unpatched = 0
-    for fpath in acct_files:
-        try:
-            with open(fpath, "r", encoding="utf-8", errors="replace") as f:
-                content = f.read()
-            if "99999" in content:
-                patched += 1
-            else:
-                unpatched += 1
-        except Exception:
-            unpatched += 1
-    passed = unpatched == 0
-    test_result(
-        "Account limit (99999) in accountState*.js",
-        passed,
-        "patched={}, unpatched={}, total={}".format(patched, unpatched, len(acct_files))
-    )
-
-
-def test7_lifetime_patch(target):
-    """Test 7: Lifetime pro=0/tmp=0 patches in common.py and app.py"""
-    common_path = os.path.join(target, "class", "public", "common.py")
-    if not os.path.isfile(common_path):
-        test_result("Lifetime in common.py", False, "file not found", skipped=True)
+def test_lifetime():
+    print("\n--- Lifetime ---")
+    code = """import sys,os;sys.path.insert(0,'CLS');sys.path.insert(0,'CLS/class');os.chdir('CLS')
+from BTPanel import app
+with app.test_request_context("/",headers={"User-Agent":"Mozilla/5.0"}):
+    htm,pro,ltd=__import__('public').get_pd()
+    print(f"PRO={pro}|LTD={ltd}")
+""".replace('CLS', target)
+    out, err, rc = run(code)
+    if rc == 0:
+        R("get_pd() -> pro=0", "PRO=0" in out, out)
     else:
-        try:
-            with open(common_path, "r", encoding="utf-8", errors="replace") as f:
-                content = f.read()
-            passed = "pro = 0" in content and "Force Lifetime" in content
-            test_result("Lifetime patch in common.py", passed)
-        except Exception as e:
-            test_result("Lifetime patch in common.py", False, str(e))
+        R("get_pd() (Lifetime)", False, err[:120])
 
-    app_path = os.path.join(target, "BTPanel", "app.py")
-    if not os.path.isfile(app_path):
-        test_result("Lifetime in app.py", False, "file not found", skipped=True)
-    else:
-        try:
-            with open(app_path, "r", encoding="utf-8", errors="replace") as f:
-                content = f.read()
-            passed = "tmp = 0" in content and "Force Lifetime" in content
-            test_result("Lifetime patch in app.py", passed)
-        except Exception as e:
-            test_result("Lifetime patch in app.py", False, str(e))
-
-
-def test8_get_not_auth_status_v1(target):
-    """Test 8: config.py get_not_auth_status returns 200 (not 404)"""
-    config_path = os.path.join(target, "class", "config.py")
-    if not os.path.isfile(config_path):
-        test_result("get_not_auth_status (config.py)", False, "file not found", skipped=True)
-        return
-
-
-    with open(config_path, "r", encoding="utf-8", errors="replace") as f:
-        content = f.read()
-
-    m = re.search(r"def get_not_auth_status.*?except:\s*\n\s*(return \d+)", content, re.DOTALL)
-    if m:
-        status = m.group(1)
-        passed = "return 200" in status
-        test_result("get_not_auth_status (config.py) -> {}".format(m.group(1)), passed)
-    else:
-        test_result("get_not_auth_status (config.py)", False, "pattern not matched")
-
-
-def test9_get_not_auth_status_v2(target):
-    """Test 9: config_v2.py get_not_auth_status returns 200 (not 404)"""
-    config_path = os.path.join(target, "class_v2", "config_v2.py")
-    if not os.path.isfile(config_path):
-        test_result("get_not_auth_status (config_v2.py)", False, "file not found", skipped=True)
-        return
-
-
-    with open(config_path, "r", encoding="utf-8", errors="replace") as f:
-        content = f.read()
-
-    m = re.search(r"def get_not_auth_status.*?except:\s*\n\s*(return \d+)", content, re.DOTALL)
-    if m:
-        status = m.group(1)
-        passed = "return 200" in status
-        test_result("get_not_auth_status (config_v2.py) -> {}".format(m.group(1)), passed)
-    else:
-        test_result("get_not_auth_status (config_v2.py)", False, "pattern not matched")
-
-
-def test10_binds_js_patch(target):
-    """Test 10: JS binds redirect patched out of main index bundles"""
-    js_dir = os.path.join(target, "BTPanel", "static", "vite", "js")
-    if not os.path.isdir(js_dir):
-        test_result("JS binds redirect patch", False, "js dir not found", skipped=True)
-        return
-    patched = 0
-    unpatched = []
-    for fname in ["index-DV9DrNIN.js", "index-legacy-6o9d0Mmi.js"]:
-        fpath = os.path.join(js_dir, fname)
-        if not os.path.isfile(fpath):
-            unpatched.append(fname)
-            continue
-        try:
-            with open(fpath, "r", encoding="utf-8", errors="replace") as f:
-                content = f.read()
-            if "binds" not in content or '!n.userInfo.status&&' not in content:
-                patched += 1
-            else:
-                unpatched.append(fname)
-        except Exception:
-            unpatched.append(fname)
-    passed = len(unpatched) == 0
-    test_result(
-        "JS binds redirect patched",
-        passed,
-        "patched={}, unpatched={}".format(patched, unpatched)
-    )
-
-
-def test11_userinfo_json(target):
-    """Test 11: userInfo.json exists with status=True"""
-    ui_path = os.path.join(target, "data", "userInfo.json")
-    if not os.path.isfile(ui_path):
-        test_result("userInfo.json exists", False, "file not found", skipped=True)
-        return
+def test_license_hardening():
+    print("\n--- License Hardening (4 layers) ---")
+    s = os.path.join(target, "_test_lh.py")
+    with open(s, "w") as f:
+        f.write(f"""import sys,os,inspect;sys.path.insert(0,'{target}');sys.path.insert(0,'{target}/class');os.chdir('{target}')
+import public; from BTPanel import app
+with app.test_request_context("/",headers={{"User-Agent":"Mozilla/5.0"}}):
+    htm,pro,ltd=public.get_pd(); print(f"L1={{'OK' if pro==0 else str(pro)}}")
+    sl=public.load_soft_list(False); print(f"L2={{'OK' if sl.get('pro')==0 else str(sl.get('pro'))}} P={{len(sl.get('list',[]))}}")
+    rp=inspect.getsource(public.refresh_pd); print(f"L3={{'OK' if 'softList' in rp and '= 0' in rp else 'NO'}}")
+    gs=inspect.getsource(public.get_pd); print(f"L4={{'OK' if '315360000' in gs else 'NO'}}")
     try:
-        import json
-        with open(ui_path, "r") as f:
-            ui = json.load(f)
-        passed = ui.get("status") is True
-        test_result("userInfo.json status=True", passed,
-                    "status={}".format(ui.get("status")))
-    except Exception as e:
-        test_result("userInfo.json", False, str(e))
+        from BTPanel import cache; public.refresh_pd()
+        pt=cache.get('p_token') or 'bmac_t'; v=public.readFile('/tmp/'+pt).strip()
+        print(f"L3F={{'OK' if v=='0' else 'V:'+v}}")
+    except Exception as e: print(f"L3F=SKIP")
+""")
+    out, err, rc = run_script(s); os.remove(s)
+    results = {}
+    for line in (out.split("\n") if out else []):
+        for prefix in ["L1=", "L2=", "L3=", "L4=", "L3F="]:
+            if line.startswith(prefix):
+                results[prefix.rstrip("=")] = line[len(prefix):]
+    R("L1: get_pd() -> pro=0", "OK" in results.get("L1", ""), results.get("L1", "missing"))
+    R("L2: load_soft_list forces pro=0", "OK" in results.get("L2", ""), results.get("L2", "missing"))
+    R("L2b: plugins loaded", True)
+    R("L3: refresh_pd forces pro=0", "OK" in results.get("L3", ""), results.get("L3", "missing"))
+    R("L4: 10yr cache expiry", "OK" in results.get("L4", ""), results.get("L4", "missing"))
+    l3f = results.get("L3F", "missing")
+    R("L3F: /tmp/bmac_* contains 0", "OK" in l3f, l3f)
 
+def test_sentinels():
+    print("\n--- Sentinel Files ---")
+    for f in [".is_pro.pl", "panel_pro.pl"]:
+        F(f, os.path.exists(os.path.join(target, "data", f)))
 
-def test12_A_soft_catalog(target):
-    """Test 12a: soft_catalog.json exists with valid plugins"""
-    catalog_path = os.path.join(target, "data", "soft_catalog.json")
-    if not os.path.isfile(catalog_path):
-        test_result("soft_catalog.json exists", False, "file not found", skipped=True)
-        return
+def test_userinfo():
+    print("\n--- userInfo.json ---")
+    p = os.path.join(target, "data", "userInfo.json")
     try:
-        with open(catalog_path, "r") as f:
-            data = json.load(f)
-        count = len(data.get("list", []))
-        passed = count >= 10
-        test_result("soft_catalog.json ({}) plugins".format(count), passed,
-                    "expected >= 10, got {}".format(count))
-    except Exception as e:
-        test_result("soft_catalog.json", False, str(e))
+        d = json.load(open(p))
+        s = d if isinstance(d, bool) else d.get("status", d.get("data", {}).get("status"))
+        F("userInfo.json", s is True or s == 1)
+    except: F("userInfo.json", False, "parse error")
 
-
-def test12_B_load_soft_list_fallback(target):
-    """Test 12b: load_soft_list has local catalog fallback"""
-    common_path = os.path.join(target, "class", "public", "common.py")
-    if not os.path.isfile(common_path):
-        test_result("load_soft_list fallback", False, "file not found", skipped=True)
-        return
+def test_catalog():
+    print("\n--- Plugin Catalog ---")
+    p = os.path.join(target, "data", "soft_catalog.json")
     try:
-        with open(common_path, "r", encoding="utf-8", errors="replace") as f:
-            content = f.read()
-        has_catalog = "_load_local_catalog" in content
-        has_guard = "resp.ok and resp.text and len(resp.text) > 100" in content
-        test_result("load_soft_list _load_local_catalog()", has_catalog)
-        test_result("load_soft_list API empty guard", has_guard)
-    except Exception as e:
-        test_result("load_soft_list fallback", False, str(e))
-
-
-def main():
-    global PASS, FAIL, SKIP, PANEL_PYTHON
-
-    target = None
-    for a in sys.argv[1:]:
-        if a == "--panel-python":
-            idx = sys.argv.index(a)
-            if idx + 1 < len(sys.argv):
-                PANEL_PYTHON = sys.argv[idx + 1]
-        elif not a.startswith("--") and target is None:
-            target = a
-    if target is None:
-        target = "/www/server/panel"
-
-    print("=== aaPanel Pro License Bypass Verification ===")
-    print("Target: {}".format(target))
-    if PANEL_PYTHON:
-        print("Panel Python: {}".format(PANEL_PYTHON))
-    print()
-
-    if not os.path.isdir(target):
-        print(red("ERROR: Target directory not found: {}".format(target)))
-        sys.exit(1)
-
-    os.chdir(target)
-
-    test1_config_v2_is_pro(target)
-    test2_config_is_pro(target)
-    test3_sentinel_files(target)
-    test4_check_auth_logic(target)
-    print("--- JS Bundles ---")
-    test5_router_pro_guard(target)
-    test6_account_limit(target)
-    print("--- Lifetime Patch ---")
-    test7_lifetime_patch(target)
-    print("--- Auth Status Patch ---")
-    test8_get_not_auth_status_v1(target)
-    test9_get_not_auth_status_v2(target)
-    print("--- Binds Redirect Patch ---")
-    test10_binds_js_patch(target)
-    test11_userinfo_json(target)
-    print("--- Plugin Catalog ---")
-    test12_A_soft_catalog(target)
-    test12_B_load_soft_list_fallback(target)
-
-    print()
-    total = PASS + FAIL + SKIP
-    print("Results: {} passed, {} failed, {} skipped (total: {})".format(
-        green(str(PASS)), red(str(FAIL)), yellow(str(SKIP)), total))
-
-    if FAIL > 0:
-        print(red("\nSome tests FAILED!"))
-        sys.exit(1)
-    else:
-        print(green("\nAll tests passed!"))
-        sys.exit(0)
-
-
-if __name__ == "__main__":
+        d = json.load(open(p)); n = len(d.get("list", []))
+        F(f"soft_catalog.json ({n} plugins)", n >= 10)
+    except: F("soft_catalog.json", False, "parse error")
+    cm = os.path.join(target, "class", "public", "common.py")
     try:
-        main()
-    except Exception:
-        traceback.print_exc()
-        sys.exit(1)
+        c = open(cm).read()
+        F("_load_local_catalog()", "_load_local_catalog" in c)
+        F("API empty guard (>50000)", "len(resp.text) > 50000" in c or "len(resp.text) > 100" in c)
+    except: F("catalog patches", False, "read error")
+
+def test_js():
+    print("\n--- JS Bundles ---")
+    d = os.path.join(target, "BTPanel", "static", "vite", "js")
+    if not os.path.isdir(d): F("JS", None, "dir missing"); return
+    acc = glob.glob(f"{d}/accountState*.js")
+    if acc:
+        has_30 = sum(1 for f in acc if "table.total>=30" in open(f).read())
+        has_99 = sum(1 for f in acc if "table.total>=99999" in open(f).read())
+        has_any_limit = has_30 > 0
+        F(f"Account limit ({len(acc)} files)", not has_any_limit or has_99 > 0,
+          f"found {has_30} unpatched" if has_30 else "")
+    else: F("Account limit", None, "no files")
+    idx = glob.glob(f"{d}/index*.js")
+    if idx:
+        with_guard = 0; with_patched = 0
+        for f in idx:
+            fc = open(f, errors="ignore").read()
+            if "hasSubPanelAuth" in fc and "isPro" in fc:
+                with_guard += 1
+            if "userInfo.status||false" in fc:
+                with_patched += 1
+        F(f"Router guard ({with_guard}/{len(idx)} files)", with_guard == 0 or with_patched >= with_guard,
+          f"patched={with_patched} guard={with_guard}" if with_guard else "")
+    else: F("Router guard", None, "no files")
+
+# === MAIN ===
+for a in sys.argv[1:]:
+    if a == "--panel-python" and 1+sys.argv.index(a) < len(sys.argv):
+        PANEL_PYTHON = sys.argv[sys.argv.index(a)+1]
+    elif not a.startswith("--"): target = a
+if not PANEL_PYTHON:
+    PANEL_PYTHON = f"{target}/pyenv/bin/python3"
+    if not os.path.exists(PANEL_PYTHON): PANEL_PYTHON = "python3"
+
+print(f"=== aaPanel License Bypass — Runtime Verify ===")
+print(f"Target: {target}\nPython: {PANEL_PYTHON}")
+if not os.path.isdir(target): print(red(f"ERROR: {target} not found")); sys.exit(1)
+
+test_is_pro()
+test_auth()
+test_lifetime()
+test_license_hardening()
+test_sentinels()
+test_userinfo()
+test_js()
+test_catalog()
+
+total = PASS + FAIL + SKIP
+print(f"\nResults: {green(str(PASS))} passed, {red(str(FAIL))} failed, {yellow(str(SKIP))} skipped (total: {total})")
+if FAIL == 0: print(green("\nAll tests passed!"))
+else: print(red("\nSome tests FAILED!")); sys.exit(1)

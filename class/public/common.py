@@ -9222,7 +9222,7 @@ def load_soft_list(force: bool = True, retry_count: int = 0):
             resp = requests.post(cloudUrl, params=pdata, headers=url_headers, verify=False, timeout=10)
 
             # 请求成功后将授权密文信息写入本地文件
-            if resp.ok and resp.text and len(resp.text) > 100:
+            if resp.ok and resp.text and len(resp.text) > 50000:
                 with open(local_cache_file, 'w') as fp:
                     fp.write(resp.text)
                 update_ok = True
@@ -9251,9 +9251,10 @@ def load_soft_list(force: bool = True, retry_count: int = 0):
         if force:
             if hasattr(PluginLoader, 'parse_plugin_list'):
                 if not PluginLoader.parse_plugin_list(1):
-                    catalog = _load_local_catalog()
-                    if catalog is not None:
-                        return catalog
+                    if not force:
+                        catalog = _load_local_catalog()
+                        if catalog is not None:
+                            return catalog
                     return _empty_soft_list()
             else:
                 import importlib
@@ -9261,25 +9262,28 @@ def load_soft_list(force: bool = True, retry_count: int = 0):
 
         plugin_list_data = PluginLoader.get_plugin_list(0)
     except:
-        catalog = _load_local_catalog()
-        if catalog is not None:
-            return catalog
+        if not force:
+            catalog = _load_local_catalog()
+            if catalog is not None:
+                return catalog
         if retry_count < 6:
             return load_soft_list(force, retry_count + 1)
         return _empty_soft_list()
 
     if not isinstance(plugin_list_data, dict):
-        catalog = _load_local_catalog()
-        if catalog is not None:
-            return catalog
+        if not force:
+            catalog = _load_local_catalog()
+            if catalog is not None:
+                return catalog
         if retry_count < 6:
             return load_soft_list(force, retry_count + 1)
         return _empty_soft_list()
 
     if 'status' in plugin_list_data and 'msg' in plugin_list_data and plugin_list_data['status'] == False:
-        catalog = _load_local_catalog()
-        if catalog is not None:
-            return catalog
+        if not force:
+            catalog = _load_local_catalog()
+            if catalog is not None:
+                return catalog
         if retry_count < 6:
             return load_soft_list(force, retry_count + 1)
         return _empty_soft_list()

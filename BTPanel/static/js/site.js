@@ -19,12 +19,14 @@ $('#cutMode .tabs-item').on('click', function () {
 			product_recommend.init(function () {
 				site.php_table_view();
 			});
-			// site.get_types();
+			break;
+		case 'java':
+			$('#bt_java_table').empty();
+			site.java_project_view();
 			break;
 		case 'nodejs':
 			$('#bt_node_table').empty();
 			$.get('/plugin?action=getConfigHtml', { name: 'nodejs' }, function (res) {
-				// if(typeof res !== 'string') $('.site_table_view .mask_layer').removeClass('hide').find('.prompt_description').html('Node version manager is not installed，<a href="javascript:;" class="btlink" onclick="bt.soft.install(\'nodejs\')">Click install</a>');
 				if (typeof res !== 'string') {
 					$('#bt_node_table+.mask_layer')
 						.removeClass('hide')
@@ -41,6 +43,7 @@ $('#cutMode .tabs-item').on('click', function () {
 });
 
 var site_table;
+var java_table;
 var node_table;
 var countryList = [];
 var site = {
@@ -1848,6 +1851,222 @@ var site = {
 			],
 		});
 	},
+	java_project_view: function () {
+		java_table = bt_tools.table({
+			el: '#bt_java_table',
+			url: '/data?action=getData',
+			cookiePrefix: 'java_table',
+			param: { table: 'sites', project_type: 'Java' },
+			minWidth: '1000px',
+			autoHeight: true,
+			default: 'No Java projects found',
+			column: [
+				{ type: 'checkbox', class: '', width: 20 },
+				{
+					fid: 'name',
+					title: lan.site.site_name,
+					sort: true,
+					sortValue: 'asc',
+					class: 'site_name',
+					type: 'link',
+					width: 130,
+					isDisabled: true,
+					event: function (row, index, ev) {
+						site.web_edit(row, true);
+					},
+					template: function (row, index) {
+						return (
+							'<div style="display:inline-flex;align-items:center;position:relative">\
+							<a class="btlink web_name" data-type="' +
+							row.name +
+							'" data-name="' +
+							row.name +
+							'" data-id="' +
+							row.id +
+							'" href="javascript:;">' +
+							(row.rname || row.name) +
+							'</a>\
+							</div>'
+						);
+					},
+				},
+				{
+					fid: 'status',
+					title: lan.site.status,
+					sort: true,
+					width: 85,
+					config: {
+						icon: true,
+						list: [
+							['1', lan.site.running_text, 'bt_success', 'glyphicon-play'],
+							['0', lan.site.stopped, 'bt_danger', 'glyphicon-pause'],
+						],
+					},
+					type: 'status',
+					event: function (row, index, ev, key, that) {
+						bt.site[parseInt(row.status) ? 'stop' : 'start'](row.id, row.name, function (res) {
+							if (res.status) that.$modify_row_data({ status: parseInt(row.status) ? '0' : '1' });
+						});
+					},
+				},
+				{
+					fid: 'runtime_type',
+					title: 'Runtime',
+					width: 120,
+					type: 'text',
+					template: function (row, index) {
+						var project_config = row.project_config || {};
+						if (typeof project_config === 'string') {
+							try { project_config = JSON.parse(project_config); } catch (e) { project_config = {}; }
+						}
+						var tcVer = project_config.tomcat_version || '';
+						var jdkVer = project_config.java_version || '';
+						var verInfo = '';
+						if (tcVer) verInfo += 'TC ' + tcVer;
+						if (jdkVer) verInfo += (verInfo ? ' / ' : '') + 'JDK ' + jdkVer;
+						return (
+							'<span class="bt_success" style="display:inline-block;padding:2px 8px;border-radius:3px;font-size:12px;background:#e8f5e9;color:#2e7d32;margin-right:4px;">Java</span>' +
+							(verInfo ? '<span style="font-size:11px;color:#888;" title="' + verInfo + '">' + verInfo + '</span>' : '')
+						);
+					},
+				},
+				{
+					fid: 'path',
+					title: lan.site.root_dir,
+					tips: 'Open path',
+					type: 'link',
+					event: function (row, index, ev) {
+						openPath(row.path);
+					},
+					template: function (row, index) {
+						return '<div style="display: flex;"><a class="btlink size_ellipsis" style="flex: 1; width: 0;" href="javascript:;" title="' + row.path + '">' + row.path + '</a></div>';
+					},
+				},
+				{
+					fid: 'edate',
+					title: lan.site.endtime,
+					width: 115,
+					class: 'set_site_edate',
+					sort: true,
+					type: 'link',
+					template: function (row, index) {
+						var _endtime = row.edate || row.endtime;
+						if (_endtime === '0000-00-00') {
+							return lan.site.web_end_time;
+						} else {
+							if (new Date(_endtime).getTime() < new Date().getTime()) {
+								return '<a href="javascript:;" class="bt_danger">' + _endtime + '</a>';
+							} else {
+								return _endtime;
+							}
+						}
+					},
+				},
+				{
+					fid: 'ps',
+					title: lan.site.note,
+					type: 'input',
+					blur: function (row, index, ev) {
+						if (row.ps == ev.target.value) return false;
+						bt.pub.set_data_ps({ id: row.id, table: 'sites', ps: ev.target.value }, function (res) {
+							if (!res.status) layer.msg(res.msg, { status: 2 });
+						});
+					},
+					keyup: function (row, index, ev) {
+						if (ev.keyCode === 13) {
+							$(this).blur();
+						}
+					},
+				},
+				{
+					title: lan.site.operate,
+					type: 'group',
+					width: 240,
+					align: 'right',
+					group: [
+						{
+							title: 'Deploy',
+							event: function (row, index, ev, key, that) {
+								site.deploy_war(row.id);
+							},
+						},
+						{
+							title: 'Rollback',
+							event: function (row, index, ev, key, that) {
+								site.rollback_war(row.id, row.name, function () {
+									that.$refresh_table_list(true);
+								});
+							},
+						},
+						{
+							title: 'Diagnose',
+							event: function (row, index, ev, key, that) {
+								site.diagnose_java(row.id, row.name);
+							},
+						},
+						{
+							title: lan.site.set,
+							event: function (row, index, ev, key, that) {
+								site.web_edit(row, true);
+							},
+						},
+						{
+							title: 'Del',
+							event: function (row, index, ev, key, that) {
+								site.del_site(row.id, row.name, function () {
+									that.$refresh_table_list(true);
+								});
+							},
+						},
+					],
+				},
+			],
+			sortParam: function (data) {
+				return { order: data.name + ' ' + data.sort };
+			},
+			tootls: [
+				{
+					type: 'search',
+					positon: ['right', 'top'],
+					placeholder: 'Domain or Remarks',
+					searchParam: 'search',
+					value: '',
+				},
+				{
+					type: 'batch',
+					positon: ['left', 'bottom'],
+					placeholder: 'Select batch operation',
+					buttonValue: 'Execute',
+					disabledSelectValue: 'Select the website to execute!',
+					selectList: [
+						{
+							group: [
+								{ title: lan.site.enable_website, param: { status: 1 } },
+								{ title: 'Disable website', param: { status: 0 } },
+							],
+							url: '/site?action=set_site_status_multiple',
+							confirmVerify: false,
+							paramName: 'sites_id',
+							paramId: 'id',
+							theadName: 'Name',
+							refresh: true,
+						},
+					],
+				},
+				{
+					type: 'page',
+					positon: ['right', 'bottom'],
+					pageParam: 'p',
+					page: 1,
+					numberParam: 'limit',
+					number: 20,
+					numberList: [10, 20, 50, 100, 200],
+					numberStatus: true,
+					jump: true,
+				},
+			],
+		});
+	},
 	php_table_view: function () {
 		var hoverInfo = {};
 		$('#bt_site_table').empty();
@@ -1971,6 +2190,10 @@ var site = {
 			default: 'Site list is empty', // 数据为空时的默认提示
 			beforeRequest: function (param) {
 				param.type = bt.get_cookie('site_type') || -1;
+				var runtimeFilter = bt.get_cookie('site_runtime_filter') || '';
+				if (runtimeFilter) {
+					param.project_type = runtimeFilter;
+				}
 				return param;
 			},
 			column: [
@@ -2077,6 +2300,22 @@ var site = {
 					},
 					event: function (row, index) {
 						site.backup_site_view({ id: row.id, name: row.name }, site_table);
+					},
+				},
+				{
+					fid: 'runtime_type',
+					title: 'Runtime',
+					width: 75,
+					type: 'text',
+					template: function (row, index) {
+						var rt = row.runtime_type || 'PHP';
+						if (rt === 'Java') {
+							return '<span style="display:inline-block;padding:1px 6px;border-radius:3px;font-size:11px;background:#e8f5e9;color:#2e7d32;">Java</span>';
+						}
+						if (rt === 'WP' || rt === 'WP2') {
+							return '<span style="display:inline-block;padding:1px 6px;border-radius:3px;font-size:11px;background:#e3f2fd;color:#1565c0;">WP</span>';
+						}
+						return '<span style="display:inline-block;padding:1px 6px;border-radius:3px;font-size:11px;background:#f5f5f5;color:#888;">PHP</span>';
 					},
 				},
 				{
@@ -3281,6 +3520,21 @@ var site = {
 			class: '',
 			form: [
 				{
+					label: 'Project Runtime',
+					must: '*',
+					group: {
+						type: 'radio',
+						name: 'project_runtime',
+						label_tips: ['PHP', 'Tomcat / Java'],
+						style: { 'margin-right': '16px' },
+						event: function (value, form, that, config, ev) {
+							var runtime = $(this).find('input[name=project_runtime]:checked').val();
+							if (typeof runtime === 'undefined') runtime = 'PHP';
+							add_web._toggle_runtime_fields(runtime);
+						},
+					},
+				},
+				{
 					label: lan.site.add_site.domain,
 					must: '*',
 					group: [
@@ -3414,6 +3668,7 @@ var site = {
 				},
 				{
 					label: lan.site.add_site.ftp,
+					class: 'php_runtime_field',
 					group: [
 						{
 							type: 'select',
@@ -3450,6 +3705,7 @@ var site = {
 				},
 				{
 					label: lan.site.add_site.ftp_set,
+					class: 'php_runtime_field',
 					hide: true,
 					group: [
 						{
@@ -3473,6 +3729,7 @@ var site = {
 				},
 				{
 					label: lan.site.add_site.database,
+					class: 'php_runtime_field',
 					group: [
 						{
 							type: 'select',
@@ -3529,6 +3786,7 @@ var site = {
 				},
 				{
 					label: lan.site.add_site.database_set,
+					class: 'php_runtime_field',
 					hide: true,
 					group: [
 						{
@@ -3554,6 +3812,7 @@ var site = {
 				},
 				{
 					label: lan.site.add_site.php_version,
+					class: 'php_runtime_field',
 					group: [
 						{
 							type: 'select',
@@ -3575,6 +3834,7 @@ var site = {
 				},
 				{
 					label: lan.site.add_site.category,
+					class: 'php_runtime_field',
 					group: [
 						{
 							type: 'select',
@@ -3607,7 +3867,7 @@ var site = {
 				},
 				{
 					label: 'SSL',
-					class: 'ssl_checkbox',
+					class: 'ssl_checkbox php_runtime_field',
 					help: {
 						style: 'color: red;line-height: 17px;margin-top: 8px;',
 						list: ['If you need to apply for SSL, please make sure that the domain name has added A record resolution for the domain name'],
@@ -3778,6 +4038,77 @@ var site = {
 			],
 		});
 
+		add_web._toggle_runtime_fields = function (runtime) {
+			var phpFields = add_web.element.find('.php_runtime_field');
+			var tomcatFields = add_web.element.find('.tomcat_runtime_field');
+			if (runtime === 'PHP' || typeof runtime === 'undefined') {
+				phpFields.removeClass('hide');
+				tomcatFields.addClass('hide');
+			} else {
+				phpFields.addClass('hide');
+				tomcatFields.removeClass('hide');
+				add_web._load_tomcat_versions();
+			}
+		};
+
+		add_web._load_tomcat_versions = function () {
+			bt.send('get_tomcat_versions', 'site/get_tomcat_versions', {}, function (rdata) {
+				var versions = (rdata && rdata.message && rdata.message.versions) ? rdata.message.versions : (rdata.versions || []);
+				if (versions.length) {
+					var add_web_element = add_web.element;
+					var select = add_web_element.find('[data-name="tomcat_version"]');
+					if (select.length === 0) return;
+					var html = '';
+					for (var i = 0; i < versions.length; i++) {
+						html += '<li data-val="' + versions[i] + '">' + versions[i] + '</li>';
+					}
+					select.find('.bt_select_list').html(html);
+					select.find('.bt_select_list li').on('click', function () {
+						var val = $(this).data('val');
+						select.find('.bt_select_val').text(val);
+						select.find('.bt_select_list').removeClass('show');
+						select.find('input[type=hidden]').val(val);
+						add_web._load_java_versions(val);
+					});
+					select.find('.bt_select_val').on('click', function (e) {
+						e.stopPropagation();
+						select.find('.bt_select_list').toggleClass('show');
+					});
+				}
+			});
+		};
+
+		add_web._load_java_versions = function (tomcatVersion) {
+			bt.send('get_java_versions', 'site/get_java_versions', { tomcat_version: tomcatVersion }, function (rdata) {
+				var versions = (rdata && rdata.message && rdata.message.versions) ? rdata.message.versions : (rdata.versions || []);
+				if (versions.length) {
+					var add_web_element = add_web.element;
+					var select = add_web_element.find('[data-name="java_version"]');
+					if (select.length === 0) return;
+					var html = '';
+					for (var i = 0; i < versions.length; i++) {
+						html += '<li data-val="' + versions[i] + '">' + versions[i] + '</li>';
+					}
+					select.find('.bt_select_list').html(html);
+					select.find('.bt_select_list li').on('click', function () {
+						var val = $(this).data('val');
+						select.find('.bt_select_val').text(val);
+						select.find('.bt_select_list').removeClass('show');
+						select.find('input[type=hidden]').val(val);
+					});
+					select.find('.bt_select_val').on('click', function (e) {
+						e.stopPropagation();
+						select.find('.bt_select_list').toggleClass('show');
+					});
+				}
+			});
+		};
+
+		// Initialize runtime to PHP
+		setTimeout(function () {
+			add_web._toggle_runtime_fields('PHP');
+		}, 100);
+
 		var web_tab = bt_tools.tab({
 			class: 'pd20',
 			type: 0,
@@ -3853,8 +4184,11 @@ var site = {
 					}
 					var webname = bt.replace_all(formValue.webname, 'http[s]?:\\/\\/', ''),
 						web_list = webname.split('\n'),
-						param = { webname: { domain: '', domainlist: [], count: 0 }, type: 'PHP', port: 80 },
-						arry = ['ps', ['path', lan.site.site_menu_2], 'type_id', 'version', 'ftp', 'sql', 'ftp_username', 'ftp_password', 'datauser', 'datapassword', 'codeing'];
+						runtime = (formValue.runtime || formValue.project_runtime || 'PHP').toLowerCase();
+
+					if (runtime === 'php') {
+						var param = { webname: { domain: '', domainlist: [], count: 0 }, type: 'PHP', port: 80 },
+							arry = ['ps', ['path', lan.site.site_menu_2], 'type_id', 'version', 'ftp', 'sql', 'ftp_username', 'ftp_password', 'datauser', 'datapassword', 'codeing'];
 					for (var i = 0; i < web_list.length; i++) {
 						var temps = web_list[i].replace(/\r\n/, '').split(':');
 						if (i === 0) {
@@ -3936,6 +4270,129 @@ var site = {
 							bt.msg(rdata);
 						}
 					});
+					} else {
+						// Tomcat/Java runtime
+						var tparam = { webname: { domain: '', domainlist: [], count: 0 }, type: 'Tomcat', port: 8080 };
+						for (var i = 0; i < web_list.length; i++) {
+							var temps = web_list[i].replace(/\r\n/, '').split(':');
+							if (i === 0) {
+								tparam['webname']['domain'] = web_list[i];
+								if (typeof temps[1] != 'undefined') tparam['port'] = temps[1];
+							} else {
+								tparam['webname']['domainlist'].push(web_list[i]);
+							}
+						}
+						tparam['webname']['count'] = tparam['webname']['domainlist'].length;
+						tparam['webname'] = JSON.stringify(tparam['webname']);
+
+						tparam['ps'] = formValue.ps;
+						tparam['path'] = formValue.path;
+						tparam['runtime'] = 'tomcat';
+						tparam['deployment_mode'] = formValue.tomcat_deploy_mode;
+						tparam['tomcat_version'] = formValue.tomcat_version;
+						tparam['java_version'] = formValue.java_version;
+						tparam['exposure_mode'] = formValue.tomcat_exposure;
+
+						if (!tparam.deployment_mode) {
+							bt_tools.msg('Please select a deployment mode', 2);
+							return;
+						}
+						if (!tparam.tomcat_version) {
+							bt_tools.msg('Please select a Tomcat version', 2);
+							return;
+						}
+						if (!tparam.java_version) {
+							bt_tools.msg('Please select a Java version', 2);
+							return;
+						}
+
+						var db_enabled = $('input[name=tomcat_db_enable]').is(':checked');
+						if (db_enabled) {
+							tparam['tomcat_db_enable'] = true;
+							tparam['database_engine'] = (formValue.tomcat_db_type === 'PostgreSQL') ? 'pgsql' : (formValue.tomcat_db_type ? formValue.tomcat_db_type.toLowerCase() : 'none');
+							if (tparam.database_engine === 'pgsql') {
+								tparam['tomcat_db_name'] = formValue.tomcat_db_name;
+								tparam['tomcat_db_user'] = formValue.tomcat_db_user;
+								tparam['tomcat_db_pass'] = formValue.tomcat_db_pass;
+								if (!tparam.tomcat_db_name || !tparam.tomcat_db_user || !tparam.tomcat_db_pass) {
+									bt_tools.msg('Please fill in all PostgreSQL database fields', 2);
+									return;
+								}
+							}
+						}
+
+						var deploy_pref = formValue.tomcat_deploy_pref;
+						tparam['deployment_pref'] = deploy_pref || 'deploy_later';
+						if (deploy_pref === 'Upload WAR now') {
+							tparam['tomcat_war_upload'] = formValue.tomcat_war_upload;
+							if (!tparam.tomcat_war_upload) {
+								bt_tools.msg('Please select a WAR file to upload', 2);
+								return;
+							}
+						} else if (deploy_pref === 'Pick from server path') {
+							tparam['tomcat_war_path'] = formValue.tomcat_war_path;
+							if (!tparam.tomcat_war_path) {
+								bt_tools.msg('Please specify a server path to the WAR file', 2);
+								return;
+							}
+						} else if (deploy_pref === 'Deploy from URL') {
+							tparam['tomcat_war_url'] = formValue.tomcat_war_url;
+							if (!tparam.tomcat_war_url) {
+								bt_tools.msg('Please enter the WAR deploy URL', 2);
+								return;
+							}
+						}
+
+						bt.send('AddSite', 'site/AddSite', tparam, function (rdata) {
+							loading.close();
+							var payload = (rdata && rdata.message) ? rdata.message : rdata;
+							if (payload.siteStatus) {
+								layer.close(indexs);
+								if (callback) callback(payload, tparam);
+
+								var nextSteps = '';
+								var deployPref = tparam.deployment_pref;
+								if (deployPref === 'deploy_later') {
+									nextSteps += '<div class="line" style="padding:10px 0"><a class="btn btn-success btn-sm" href="javascript:;" onclick="site.deploy_war(\'' + payload.siteId + '\')">Deploy WAR</a></div>';
+								}
+								if (tparam.tomcat_db_enable) {
+									nextSteps += '<div class="line"><p><strong>Database Credentials:</strong></p>';
+									var dbInfo = payload.databaseInfo || {};
+									if (dbInfo.databaseProvisioned) {
+										nextSteps += '<p>Name: ' + (dbInfo.databaseName || tparam.tomcat_db_name || '') + '</p>';
+										nextSteps += '<p>User: ' + (dbInfo.databaseUser || tparam.tomcat_db_user || '') + '</p>';
+										nextSteps += '<p>Password: ' + (dbInfo.databasePass || tparam.tomcat_db_pass || '') + '</p>';
+									} else if (tparam.database_engine === 'pgsql') {
+										nextSteps += '<p>Name: ' + (tparam.tomcat_db_name || '') + '</p>';
+										nextSteps += '<p>User: ' + (tparam.tomcat_db_user || '') + '</p>';
+										nextSteps += '<p>Password: ' + (tparam.tomcat_db_pass || '') + '</p>';
+									}
+									nextSteps += '</div>';
+								}
+								if (payload.nextSteps && payload.nextSteps.length) {
+									for (var ns = 0; ns < payload.nextSteps.length; ns++) {
+										nextSteps += '<div class="line" style="padding:10px 0"><span>' + payload.nextSteps[ns].label + '</span></div>';
+									}
+								}
+								nextSteps += '<div class="line" style="padding:10px 0"><a class="btlink" href="javascript:;" onclick="bt.site.php_table_view()">Manage Projects</a></div>';
+
+								if (nextSteps === '') {
+									bt.msg({ msg: 'Tomcat project created successfully', icon: 1 });
+								} else {
+									bt.open({
+										type: 1,
+										area: '550px',
+										title: 'Tomcat Project Created',
+										closeBtn: 2,
+										shadeClose: false,
+										content: "<div class='success-msg'><div class='pic'><img src='/static/img/success-pic.png'></div><div class='suc-con'>" + nextSteps + '</div></div>',
+									});
+								}
+							} else {
+								bt.msg(rdata);
+							}
+						});
+					}
 				} else if (tabActive == 1) {
 					//批量创建
 					var loading = bt.load();
@@ -4094,6 +4551,292 @@ var site = {
 			},
 		});
 	},
+	diagnose_java: function (siteId, siteName) {
+		var loading = bt.load('Running diagnostics...');
+		var that = this;
+		bt_tools.send({
+			url: '/site?action=diagnose_java_runtime',
+			data: { project_id: siteId }
+		}, function (rdata) {
+			loading.close();
+			if (!rdata.status) {
+				bt.msg({ status: false, msg: rdata.msg || 'Diagnostics failed' });
+				return;
+			}
+			that._show_diagnostics_modal(rdata, siteName);
+		});
+	},
+
+	_show_diagnostics_modal: function (rdata, siteName) {
+		var diag = rdata;
+		var summary = diag.summary || {};
+		var summaryColor = summary.status === 'healthy' ? '#20a53a' : summary.status === 'degraded' ? '#f39c12' : '#ed4014';
+
+		var summaryHtml = '<div style="padding:15px;margin-bottom:15px;background:#f7f8fa;border-radius:6px;">' +
+			'<div style="display:flex;align-items:center;margin-bottom:10px;">' +
+			'<span style="font-size:16px;font-weight:600;">' + (diag.project_name || siteName) + '</span>' +
+			'<span style="margin-left:12px;padding:2px 10px;border-radius:12px;font-size:12px;color:#fff;background:' + summaryColor + ';">' + (summary.status || 'unknown').toUpperCase() + '</span>' +
+			'</div>' +
+			'<div style="display:flex;gap:20px;font-size:12px;color:#666;">' +
+			'<span><b style="color:#20a53a;">' + (summary.passed || 0) + '</b> Passed</span>' +
+			'<span><b style="color:#f39c12;">' + (summary.warnings || 0) + '</b> Warnings</span>' +
+			'<span><b style="color:#ed4014;">' + (summary.failures || 0) + '</b> Failed</span>' +
+			'</div></div>';
+
+		var checksHtml = '<div style="margin-bottom:15px;"><h4 style="margin-bottom:8px;">Checks</h4><div class="divtable"><table class="table table-hover"><tbody>';
+		(diag.checks || []).forEach(function (c) {
+			var icon = c.status === 'pass' ? '<span style="color:#20a53a;" class="glyphicon glyphicon-ok-circle"></span>' :
+				c.status === 'warn' ? '<span style="color:#f39c12;" class="glyphicon glyphicon-warning-sign"></span>' :
+				'<span style="color:#ed4014;" class="glyphicon glyphicon-remove-circle"></span>';
+			checksHtml += '<tr><td width="30">' + icon + '</td><td width="160">' + c.name + '</td><td>' + c.detail + '</td></tr>';
+		});
+		checksHtml += '</tbody></table></div></div>';
+
+		var issuesHtml = '';
+		if ((diag.issues || []).length > 0) {
+			issuesHtml = '<div style="margin-bottom:15px;"><h4 style="margin-bottom:8px;color:#ed4014;">Issues Found</h4><ul style="padding-left:20px;">';
+			diag.issues.forEach(function (i) { issuesHtml += '<li style="margin-bottom:4px;">' + i + '</li>'; });
+			issuesHtml += '</ul></div>';
+		}
+
+		var suggestionsHtml = '';
+		if ((diag.suggestions || []).length > 0) {
+			suggestionsHtml = '<div><h4 style="margin-bottom:8px;color:#2d8cf0;">Suggestions</h4><ul style="padding-left:20px;">';
+			diag.suggestions.forEach(function (s) { suggestionsHtml += '<li style="margin-bottom:4px;">' + s + '</li>'; });
+			suggestionsHtml += '</ul></div>';
+		}
+
+		bt_tools.open({
+			title: 'Diagnostics - ' + (siteName || diag.project_name || ''),
+			area: ['700px', '520px'],
+			btn: ['Close'],
+			content: '<div style="padding:20px;max-height:440px;overflow-y:auto;">' + summaryHtml + checksHtml + issuesHtml + suggestionsHtml + '</div>'
+		});
+	},
+
+	deploy_war: function (siteId) {
+		var activeTab = 'upload';
+		var configCache = {};
+
+		var buildSourceConfig = function () {
+			var cfg = {};
+			if (activeTab === 'upload') {
+				cfg = { filename: configCache.filename || 'app.war', file_data: configCache.file_data };
+			} else if (activeTab === 'server_path') {
+				cfg = { path: configCache.server_path || '' };
+			} else if (activeTab === 'url') {
+				cfg = { url: configCache.artifact_url || '' };
+			} else if (activeTab === 'exploded') {
+				cfg = { path: configCache.exploded_path || '' };
+			}
+			return cfg;
+		};
+
+		var renderTabs = function () {
+			var tabs = [
+				{ key: 'upload', label: 'Server File', active: activeTab === 'upload' },
+				{ key: 'server_path', label: 'Custom Path', active: activeTab === 'server_path' },
+				{ key: 'url', label: 'URL', active: activeTab === 'url' },
+				{ key: 'exploded', label: 'Exploded Dir', active: activeTab === 'exploded' },
+			];
+			var html = '<div style="margin-bottom:15px;border-bottom:1px solid #eee;">';
+			tabs.forEach(function (t) {
+				html += '<span class="deploy-tab" data-tab="' + t.key + '" style="cursor:pointer;display:inline-block;padding:8px 16px;font-size:13px;' +
+					(t.active ? 'border-bottom:2px solid #20a53a;color:#20a53a;font-weight:600;' : 'color:#666;') + '">' + t.label + '</span>';
+			});
+			html += '</div>';
+			return html;
+		};
+
+		var renderTabContent = function () {
+			if (activeTab === 'upload') {
+				return '<div class="line">' +
+					'<span class="tname">WAR File (Server Path)</span>' +
+					'<div class="info-r">' +
+					'<input type="text" name="deploy_war_file" class="bt-input-text" style="width:320px;" placeholder="Select a WAR file from the server (max 200MB)" readonly />' +
+					'<span class="glyphicon glyphicon-folder-open cursor" style="margin-left:8px;" id="deploy_war_select" title="Browse"></span>' +
+					'</div></div>';
+			} else if (activeTab === 'server_path') {
+				return '<div class="line">' +
+					'<span class="tname">Server Path</span>' +
+					'<div class="info-r">' +
+					'<input type="text" name="deploy_war_path" class="bt-input-text" style="width:320px;" placeholder="/path/to/app.war" />' +
+					'<span class="glyphicon glyphicon-folder-open cursor" style="margin-left:8px;" id="deploy_path_select" title="Browse"></span>' +
+					'</div></div>';
+			} else if (activeTab === 'url') {
+				return '<div class="line">' +
+					'<span class="tname">Artifact URL</span>' +
+					'<div class="info-r">' +
+					'<input type="text" name="deploy_war_url" class="bt-input-text" style="width:380px;" placeholder="https://example.com/app.war" />' +
+					'</div></div>';
+			} else if (activeTab === 'exploded') {
+				return '<div class="line">' +
+					'<span class="tname">Directory</span>' +
+					'<div class="info-r">' +
+					'<input type="text" name="deploy_exploded_path" class="bt-input-text" style="width:320px;" placeholder="/path/to/exploded/webapp" />' +
+					'<span class="glyphicon glyphicon-folder-open cursor" style="margin-left:8px;" id="deploy_exploded_select" title="Browse"></span>' +
+					'</div></div>';
+			}
+			return '';
+		};
+
+		var contentHtml = '<div id="deploy_modal_content" style="padding:15px;">' +
+			'<div id="deploy_tabs"></div>' +
+			'<div id="deploy_tab_content"></div>' +
+			'<div style="margin-top:10px;font-size:11px;color:#999;">Supported: .war files (max 200MB), exploded webapp directories, and remote HTTP(S) URLs</div>' +
+			'</div>';
+
+		var layerIndex = bt_tools.open({
+			title: 'Deploy WAR to Project',
+			area: ['600px', '300px'],
+			btn: ['Deploy', 'Cancel'],
+			content: contentHtml,
+			success: function ($layer) {
+				$('#deploy_tabs').html(renderTabs());
+				$('#deploy_tab_content').html(renderTabContent());
+
+				$('.deploy-tab').on('click', function () {
+					activeTab = $(this).data('tab');
+					$('.deploy-tab').each(function () {
+						var t = $(this).data('tab');
+						$(this).css('border-bottom', t === activeTab ? '2px solid #20a53a' : 'none');
+						$(this).css('color', t === activeTab ? '#20a53a' : '#666');
+						$(this).css('font-weight', t === activeTab ? '600' : '400');
+					});
+					$('#deploy_tab_content').html(renderTabContent());
+					if (activeTab === 'upload') {
+						$('#deploy_war_select').on('click', function () {
+							bt.select_path('deploy_war_file', 'file', function (path) {
+								$('input[name=deploy_war_file]').val(path);
+								configCache.filename = path.split('/').pop();
+							});
+						});
+					} else if (activeTab === 'server_path') {
+						$('#deploy_path_select').on('click', function () {
+							bt.select_path('deploy_war_path', 'file', function (path) {
+								$('input[name=deploy_war_path]').val(path);
+							});
+						});
+					} else if (activeTab === 'exploded') {
+						$('#deploy_exploded_select').on('click', function () {
+							bt.select_path('deploy_exploded_path', 'folder', function (path) {
+								$('input[name=deploy_exploded_path]').val(path);
+							});
+						});
+					}
+				});
+
+				$('#deploy_war_select').on('click', function () {
+					bt.select_path('deploy_war_file', 'file', function (path) {
+						$('input[name=deploy_war_file]').val(path);
+						configCache.filename = path.split('/').pop();
+					});
+				});
+			},
+			yes: function (indexs) {
+				var sourceType = activeTab === 'server_path' ? 'server_path' : activeTab === 'url' ? 'url' : activeTab === 'exploded' ? 'exploded_dir' : 'browser_upload';
+				var sourceConfig = {};
+
+				if (activeTab === 'server_path') {
+					sourceConfig.path = $('input[name=deploy_war_path]').val();
+					if (!sourceConfig.path) { bt_tools.msg('Please enter a server path', 2); return false; }
+				} else if (activeTab === 'url') {
+					sourceConfig.url = $('input[name=deploy_war_url]').val();
+					if (!sourceConfig.url) { bt_tools.msg('Please enter a URL', 2); return false; }
+				} else if (activeTab === 'exploded') {
+					sourceConfig.path = $('input[name=deploy_exploded_path]').val();
+					if (!sourceConfig.path) { bt_tools.msg('Please enter a directory path', 2); return false; }
+				} else {
+					var fp = $('input[name=deploy_war_file]').val();
+					if (!fp) { bt_tools.msg('Please select a WAR file', 2); return false; }
+					var ext = fp.split('.').pop().toLowerCase();
+					if (ext !== 'war') { bt_tools.msg('Only .war files are supported', 2); return false; }
+					sourceConfig = { filename: fp.split('/').pop(), path: fp };
+					sourceType = 'server_path';
+				}
+
+				var loading = bt.load('Deploying, please wait...');
+				bt_tools.send({
+					url: '/site?action=deploy_war',
+					data: {
+						project_id: siteId,
+						source_type: sourceType,
+						source_config: JSON.stringify(sourceConfig),
+					}
+				}, function (rdata) {
+					loading.close();
+					var payload = (rdata && rdata.message) ? rdata.message : rdata;
+					if (rdata.status === 0 || payload.releaseId) {
+						layer.close(indexs);
+						bt.msg({ msg: 'Deployed successfully. Release: ' + (payload.releaseId || ''), icon: 1 });
+						site_table && site_table.$refresh_table_list(true);
+						java_table && java_table.$refresh_table_list(true);
+					} else {
+						bt.msg({ status: false, msg: payload.msg || rdata.msg || 'Deployment failed' });
+					}
+				});
+			},
+		});
+	},
+
+	rollback_war: function (siteId, siteName, callback) {
+		var dform = bt_tools.form({
+			form: [
+				{
+					label: 'Actions',
+					group: {
+						type: 'help',
+						list: [
+							'<div style="border:1px solid #f5a623;background:#fff8e1;padding:10px;border-radius:4px;margin-bottom:8px;">' +
+							'<strong style="color:#e65100;">Warning:</strong> This will revert the project to its previous deployment. The current deployment will be replaced. Nginx will be switched to the previous upstream.</div>',
+						],
+					},
+				},
+				{
+					label: 'Rollback to',
+					group: {
+						type: 'select',
+						name: 'rollback_target',
+						width: '200px',
+						list: [
+							{ title: 'Previous release (default)', value: '' },
+						],
+					},
+				},
+			],
+		});
+		bt_tools.open({
+			title: 'Rollback - ' + (siteName || ''),
+			area: ['550px', '280px'],
+			btn: ['Rollback', 'Cancel'],
+			content: dform.$reader_content(),
+			success: function () {
+				dform.$event_bind();
+			},
+			yes: function (indexs) {
+				bt.confirm({ title: 'Confirm Rollback', msg: 'Are you sure you want to rollback this project to the previous release? This may affect running applications.' }, function () {
+					var fv = dform.$get_form_value();
+					var loading = bt.load('Rolling back...');
+					var data = { project_id: siteId };
+					if (fv.rollback_target) data.target_release_id = fv.rollback_target;
+					bt_tools.send({
+						url: '/site?action=rollback_war',
+						data: data,
+					}, function (rdata) {
+						loading.close();
+						if (rdata.status) {
+							layer.close(indexs);
+							bt.msg({ msg: 'Rolled back to release: ' + (rdata.release_id || 'previous'), icon: 1 });
+							if (callback) callback();
+						} else {
+							bt.msg({ status: false, msg: rdata.msg || 'Rollback failed' });
+						}
+					});
+				});
+			},
+		});
+	},
+
 	set_default_page: function () {
 		bt.open({
 			type: 1,
@@ -12307,9 +13050,228 @@ var site = {
 									items: [
 										{ name: 'key', width: '48%', height: '220px', type: 'textarea', value: rdata.key },
 										{ name: 'csr', width: '48%', height: '220px', type: 'textarea', value: rdata.csr },
-									],
-								},
-								{
+					],
+				},
+				{
+					label: 'Deployment Mode',
+					class: 'tomcat_runtime_field',
+					must: '*',
+					hide: true,
+					group: {
+						type: 'radio',
+						name: 'tomcat_deploy_mode',
+						label_tips: ['Shared', 'Isolated'],
+						style: { 'margin-right': '16px' },
+					},
+					help: {
+						list: ['Shared: Multiple sites share one Tomcat instance', 'Isolated: Dedicated Tomcat instance for this project'],
+					},
+				},
+				{
+					label: 'Tomcat Version',
+					class: 'tomcat_runtime_field',
+					must: '*',
+					hide: true,
+					group: {
+						type: 'select',
+						name: 'tomcat_version',
+						width: '200px',
+						list: [],
+						placeholder: 'Select Tomcat version',
+						change: function (value, form, that, config, ev) {
+							var tv = value['tomcat_version'];
+							if (tv) {
+								add_web._load_java_versions(tv);
+							}
+						},
+					},
+				},
+				{
+					label: 'Java Version',
+					class: 'tomcat_runtime_field',
+					must: '*',
+					hide: true,
+					group: {
+						type: 'select',
+						name: 'java_version',
+						width: '200px',
+						list: [],
+						placeholder: 'Select Java version',
+					},
+				},
+				{
+					label: 'Exposure Mode',
+					class: 'tomcat_runtime_field',
+					hide: true,
+					group: {
+						type: 'select',
+						name: 'tomcat_exposure',
+						width: '200px',
+						list: [
+							{ title: 'Root domain', value: 'root' },
+							{ title: 'Subdirectory bind', value: 'subdirectory' },
+						],
+					},
+				},
+				{
+					label: 'Database',
+					class: 'tomcat_runtime_field',
+					hide: true,
+					group: [
+						{
+							type: 'checkbox',
+							name: 'tomcat_db_enable',
+							title: 'Provision a database for this project',
+							event: function (value, form, that, config, ev) {
+								var checked = $(this).find('input[name=tomcat_db_enable]').is(':checked');
+								if (checked) {
+									form['tomcat_db_type'].parents('.line').removeClass('hide');
+								} else {
+									form['tomcat_db_type'].parents('.line').addClass('hide');
+									form['tomcat_db_name'].parents('.line').addClass('hide');
+									form['tomcat_db_user'].parents('.line').addClass('hide');
+									form['tomcat_db_pass'].parents('.line').addClass('hide');
+								}
+							},
+						},
+					],
+				},
+				{
+					label: 'Database Type',
+					class: 'tomcat_runtime_field',
+					hide: true,
+					group: {
+						type: 'select',
+						name: 'tomcat_db_type',
+						width: '200px',
+						list: [
+							{ title: 'MySQL', value: 'MySQL' },
+							{ title: 'PostgreSQL', value: 'PostgreSQL' },
+						],
+						change: function (value, form, that, config, ev) {
+							if (value['tomcat_db_type'] === 'PostgreSQL') {
+								form['tomcat_db_name'].parents('.line').removeClass('hide');
+								form['tomcat_db_user'].parents('.line').removeClass('hide');
+								form['tomcat_db_pass'].parents('.line').removeClass('hide');
+							} else {
+								form['tomcat_db_name'].parents('.line').addClass('hide');
+								form['tomcat_db_user'].parents('.line').addClass('hide');
+								form['tomcat_db_pass'].parents('.line').addClass('hide');
+							}
+						},
+					},
+				},
+				{
+					label: 'Database Name',
+					class: 'tomcat_runtime_field',
+					hide: true,
+					group: {
+						type: 'text',
+						name: 'tomcat_db_name',
+						width: '200px',
+						placeholder: 'Enter database name',
+					},
+				},
+				{
+					label: 'Database Username',
+					class: 'tomcat_runtime_field',
+					hide: true,
+					group: {
+						type: 'text',
+						name: 'tomcat_db_user',
+						width: '200px',
+						placeholder: 'Enter database username',
+					},
+				},
+				{
+					label: 'Database Password',
+					class: 'tomcat_runtime_field',
+					hide: true,
+					group: {
+						type: 'text',
+						name: 'tomcat_db_pass',
+						width: '200px',
+						placeholder: 'Enter database password',
+					},
+				},
+				{
+					label: 'Deployment',
+					class: 'tomcat_runtime_field',
+					hide: true,
+					group: {
+						type: 'radio',
+						name: 'tomcat_deploy_pref',
+						label_tips: ['Deploy later', 'Upload WAR now', 'Pick from server path', 'Deploy from URL'],
+						style: { 'margin-right': '8px' },
+						event: function (value, form, that, config, ev) {
+							var pref = $(this).find('input[name=tomcat_deploy_pref]:checked').val();
+							var uploadLine = form['tomcat_war_upload'].parents('.line');
+							var pathLine = form['tomcat_war_path'].parents('.line');
+							var urlLine = form['tomcat_war_url'].parents('.line');
+							uploadLine.addClass('hide');
+							pathLine.addClass('hide');
+							urlLine.addClass('hide');
+							if (pref === 'Upload WAR now') {
+								uploadLine.removeClass('hide');
+							} else if (pref === 'Pick from server path') {
+								pathLine.removeClass('hide');
+							} else if (pref === 'Deploy from URL') {
+								urlLine.removeClass('hide');
+							}
+						},
+					},
+				},
+				{
+					label: 'WAR File',
+					class: 'tomcat_runtime_field',
+					hide: true,
+					group: {
+						type: 'text',
+						name: 'tomcat_war_upload',
+						width: '300px',
+						placeholder: 'Click to select a WAR file (max 200MB)',
+						icon: {
+							type: 'glyphicon-folder-open',
+							select: 'file',
+							event: function (ev, that, input) {
+								bt.select_path('tomcat_war_upload', 'file', function (path) {
+									input.val(path);
+								});
+							},
+						},
+					},
+				},
+				{
+					label: 'Server Path',
+					class: 'tomcat_runtime_field',
+					hide: true,
+					group: {
+						type: 'text',
+						name: 'tomcat_war_path',
+						width: '300px',
+						placeholder: 'Enter absolute path to WAR on server',
+						icon: {
+							type: 'glyphicon-folder-open',
+							event: function (ev, that, input) {
+								bt.select_path('tomcat_war_path', 'file', function (path) {
+									input.val(path);
+								});
+							},
+						},
+					},
+				},
+				{
+					label: 'Deploy URL',
+					class: 'tomcat_runtime_field',
+					hide: true,
+					group: {
+						type: 'text',
+						name: 'tomcat_war_url',
+						width: '300px',
+						placeholder: 'https://example.com/myapp.war',
+					},
+				},
+				{
 									items: [
 										{
 											text: lan.site.ssl_close,

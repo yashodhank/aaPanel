@@ -513,11 +513,17 @@ make
         if not jdk_path:
             jdk_path = ''
 
-        shell_str = (
-            'rm -rf /tmp/1.sh && '
-            '/usr/local/curl/bin/curl -o /tmp/1.sh %s/install/src/webserver/shell/new_jdk.sh && '
-            'bash /tmp/1.sh install %s %s'
-        ) % (public.get_url(), version, jdk_path)
+        if version in ("10", "11"):
+            local_script = public.get_panel_path() + '/install/tomcat_install.sh'
+            shell_str = (
+                'bash %s install %s %s'
+            ) % (local_script, version, jdk_path)
+        else:
+            shell_str = (
+                'rm -rf /tmp/1.sh && '
+                '/usr/local/curl/bin/curl -o /tmp/1.sh %s/install/src/webserver/shell/new_jdk.sh && '
+                'bash /tmp/1.sh install %s %s'
+            ) % (public.get_url(), version, jdk_path)
 
         if not os.path.exists("/tmp/panelTask.pl"):  # 如果当前任务队列并未执行，就把日志清空
             public.writeFile('/tmp/panelExec.log', '')
@@ -554,7 +560,7 @@ make
 
 
 def bt_tomcat(ver: int) -> Optional[TomCat]:
-    if ver not in (7, 8, 9, 10) and ver not in ("7", "8", "9", "10"):
+    if ver not in (7, 8, 9, 10, 11) and ver not in ("7", "8", "9", "10", "11"):
         return None
     return TomCat(tomcat_path="/usr/local/bttomcat/tomcat%d" % int(ver))
 

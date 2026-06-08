@@ -37,12 +37,18 @@ class main(projectBase):
     __tomcat7_server = '/usr/local/bttomcat/tomcat7/conf/server.xml'
     __tomcat8_server = '/usr/local/bttomcat/tomcat8/conf/server.xml'
     __tomcat9_server = '/usr/local/bttomcat/tomcat9/conf/server.xml'
+    __tomcat10_server = '/usr/local/bttomcat/tomcat10/conf/server.xml'
+    __tomcat11_server = '/usr/local/bttomcat/tomcat11/conf/server.xml'
     __tomcat7_path = '/usr/local/bttomcat/tomcat7'
     __tomcat8_path = '/usr/local/bttomcat/tomcat8'
     __tomcat9_path = '/usr/local/bttomcat/tomcat9'
+    __tomcat10_path = '/usr/local/bttomcat/tomcat10'
+    __tomcat11_path = '/usr/local/bttomcat/tomcat11'
     __tomcat7_path_bak = '/usr/local/bttomcat/tomcat_bak7'
     __tomcat8_path_bak = '/usr/local/bttomcat/tomcat_bak8'
     __tomcat9_path_bak = '/usr/local/bttomcat/tomcat_bak9'
+    __tomcat10_path_bak = '/usr/local/bttomcat/tomcat_bak10'
+    __tomcat11_path_bak = '/usr/local/bttomcat/tomcat_bak11'
     __site_path = '/www/server/bt_tomcat_web/'
     _springboot = '/var/tmp/springboot'
     _springboot_pid_path = '{}/vhost/pids'.format(_springboot)
@@ -287,13 +293,14 @@ class main(projectBase):
         @param get<dict_obj>
         @return string
         '''
-        ret = ["7", "8", "9", "10"]
+        ret = ["7", "8", "9", "10", "11"]
         default_path = "/usr/local/btjdk/jdk8/bin/java"
         ret2 = {
             'tomcat7': {'status': False, "jdk_path": default_path},
             'tomcat8': {'status': False, "jdk_path": default_path},
             'tomcat9': {'status': False, "jdk_path": default_path},
             'tomcat10': {'status': False, "jdk_path": default_path},
+            'tomcat11': {'status': False, "jdk_path": default_path},
         }
         rep_deemon_sh = re.compile(r"^JAVA_HOME=(?P<path>.*)\n", re.M)
         for i in ret:
@@ -318,8 +325,11 @@ class main(projectBase):
                     ret2["tomcat" + i]["tomcat_server"] = self.__tomcat9_server
                     ret2["tomcat" + i]["tomcat_start"] = self.__tomcat9_path + '/bin/daemon.sh'
                 elif i == '10':
-                    ret2["tomcat" + i]["tomcat_server"] = '/usr/local/bttomcat/tomcat10/conf/server.xml'
-                    ret2["tomcat" + i]["tomcat_start"] = "/usr/local/bttomcat/tomcat10/bin/daemon.sh"
+                    ret2["tomcat" + i]["tomcat_server"] = self.__tomcat10_server
+                    ret2["tomcat" + i]["tomcat_start"] = self.__tomcat10_path + '/bin/daemon.sh'
+                elif i == '11':
+                    ret2["tomcat" + i]["tomcat_server"] = self.__tomcat11_server
+                    ret2["tomcat" + i]["tomcat_start"] = self.__tomcat11_path + '/bin/daemon.sh'
         return ret2
     
     def get_tomcat_info(self, version):
@@ -374,18 +384,23 @@ class main(projectBase):
         if version == "7":
             if os_ver == 'Ubuntu':
                 return public.returnMsg(False, 'Operating system not supported!')
-        download_url = self.test_download_url()
-        if get.type != 'install' and os.path.exists("/tmp/1.sh"):
-            public.ExecShell("bash /tmp/1.sh %s %s >>%s" % (get.type, version, tmp_file))
-        else:
-            if download_url is None:
-                error = '<br>Error: Unable to connect to the Baota official website. Please follow the steps below to resolve the issue and try again:<br>Solution: <a target="_blank" class="btlink" href="https://www.bt.cn/bbs/thread-87257-1-1.html">https://www.bt.cn/bbs/thread-87257-1-1.html</a><br>'
-                raise public.PanelError(error)
-                # return public.returnMsg(False, 'Network connection error<br>Please check the network configuration or change the node')
+        if version in ("10", "11"):
+            local_script = public.get_panel_path() + '/install/tomcat_install.sh'
             public.ExecShell(
-                "rm -rf /tmp/1.sh && /usr/local/curl/bin/curl -o /tmp/1.sh %s/install/src/webserver/shell/new_jdk.sh && bash  /tmp/1.sh %s %s >>%s" % (
-                download_url, get.type, version, tmp_file)
+                "bash %s %s %s >>%s" % (local_script, get.type, version, tmp_file)
             )
+        else:
+            download_url = self.test_download_url()
+            if get.type != 'install' and os.path.exists("/tmp/1.sh"):
+                public.ExecShell("bash /tmp/1.sh %s %s >>%s" % (get.type, version, tmp_file))
+            else:
+                if download_url is None:
+                    error = '<br>Error: Unable to connect to the Baota official website. Please follow the steps below to resolve the issue and try again:<br>Solution: <a target="_blank" class="btlink" href="https://www.bt.cn/bbs/thread-87257-1-1.html">https://www.bt.cn/bbs/thread-87257-1-1.html</a><br>'
+                    raise public.PanelError(error)
+                public.ExecShell(
+                    "rm -rf /tmp/1.sh && /usr/local/curl/bin/curl -o /tmp/1.sh %s/install/src/webserver/shell/new_jdk.sh && bash  /tmp/1.sh %s %s >>%s" % (
+                    download_url, get.type, version, tmp_file)
+                )
         
         # self.collect_msg("tomcat-{}".format(version), log_path=tmp_file)
         tomcat_status = self.get_tomcat_version(None)
@@ -468,7 +483,11 @@ echo "${NODE_URL}"
             )
             raise public.PanelError(error)
         
-        shell_str = (
+        if version in ("10", "11"):
+            local_script = public.get_panel_path() + '/install/tomcat_install.sh'
+            shell_str = ("bash %s %s %s %s >>%s" % (local_script, action, version, jdk_path, tmp_file))
+        else:
+            shell_str = (
                         'rm -rf /tmp/1.sh && '
                         'wget -O /tmp/1.sh %s/install/src/webserver/shell/new_jdk.sh && '
                         'bash /tmp/1.sh %s %s  %s >>%s'
@@ -676,7 +695,12 @@ make
             else:
                 return False
         elif version == '10' or version == 'tomcat10' or version == 10:
-            if self.xml_init('/usr/local/bttomcat/tomcat10/conf/server.xml'):
+            if self.xml_init(self.__tomcat10_server):
+                return True
+            else:
+                return False
+        elif version == '11' or version == 'tomcat11' or version == 11:
+            if self.xml_init(self.__tomcat11_server):
                 return True
             else:
                 return False
@@ -2965,7 +2989,7 @@ make
             os.makedirs(project_path)
             public.set_own(project_path, 'www')
         # project_name = get.project_name.strip()
-        tomcat_list = ["7", "8", "9"]
+        tomcat_list = ["7", "8", "9", "10", "11"]
         if not tomcat_version in tomcat_list: return public.returnMsg(False, 'Please specify the Tomcat version!')
         # 判断tomcat是否存在
         tomcat_info = self.get_tomcat_info(tomcat_version)
@@ -3075,7 +3099,7 @@ make
             get.bind_extranet = 1
         else:
             get.bind_extranet = 1
-        tomcat_list = ["7", "8", "9"]
+        tomcat_list = ["7", "8", "9", "10", "11"]
         if not tomcat_version in tomcat_list: return public.returnMsg(False, 'Please specify the Tomcat version!')
         if int(port) < 1 or int(port) > 65535: return public.returnMsg(False, 'Invalid port range')
         if self.check_port(port): return public.returnMsg(False, "Port is occupied, please use another port")
@@ -3112,6 +3136,22 @@ make
             public.ExecShell(
                 'cp -r %s/* %s && chown -R www:www %s' % (
                 self.__tomcat9_path_bak, self.__site_path + domain, self.__site_path + domain)
+                )
+        if tomcat_version == 'tomcat10' or tomcat_version == '10':
+            if not os.path.exists(self.__tomcat10_path_bak + '/conf/server.xml'): return public.returnMsg(
+                False, "Tomcat10 configuration file does not exist, please reinstall Tomcat10"
+                )
+            public.ExecShell(
+                'cp -r %s/* %s && chown -R www:www %s' % (
+                self.__tomcat10_path_bak, self.__site_path + domain, self.__site_path + domain)
+                )
+        if tomcat_version == 'tomcat11' or tomcat_version == '11':
+            if not os.path.exists(self.__tomcat11_path_bak + '/conf/server.xml'): return public.returnMsg(
+                False, "Tomcat11 configuration file does not exist, please reinstall Tomcat11"
+                )
+            public.ExecShell(
+                'cp -r %s/* %s && chown -R www:www %s' % (
+                self.__tomcat11_path_bak, self.__site_path + domain, self.__site_path + domain)
                 )
         # server.xml
         if os.path.exists(self.__site_path + domain + '/conf/server.xml'):
@@ -3504,7 +3544,7 @@ make
     
     def get_tomcat_domain(self, get):
         verison = str(get.version).strip()
-        version_list = ["7", "8", "9"]
+        version_list = ["7", "8", "9", "10", "11"]
         if verison not in version_list: return public.returnMsg(False, 'Please select a version')
         data = public.M('sites').where('project_type=?', ('Java')).select()
         ret = []
@@ -3636,7 +3676,7 @@ make
                             project_config['tomcat_version']
                     )
                     ): return public.returnMsg(False, 'Failed to repair, the current Tomcat version is not installed')
-            tomcat_list = ["7", "8", "9"]
+            tomcat_list = ["7", "8", "9", "10", "11"]
             if not project_config['tomcat_version'] in tomcat_list: return public.returnMsg(False, 'Please specify the Tomcat version!')
             if self.check_port(str(project_config['port'])):
                 return public.returnMsg(False, "Port %s is occupied, repair failed" % str(project_config['port']))
@@ -3675,6 +3715,22 @@ make
                 public.ExecShell(
                     'cp -r %s/* %s && chown -R www:www %s' % (
                     self.__tomcat9_path_bak, self.__site_path + domain, self.__site_path + domain)
+                    )
+            if tomcat_version == 'tomcat10' or tomcat_version == '10':
+                if not os.path.exists(self.__tomcat10_path_bak + '/conf/server.xml'): return public.returnMsg(
+                    False, "Tomcat10 configuration file does not exist, please reinstall Tomcat10"
+                    )
+                public.ExecShell(
+                    'cp -r %s/* %s && chown -R www:www %s' % (
+                    self.__tomcat10_path_bak, self.__site_path + domain, self.__site_path + domain)
+                    )
+            if tomcat_version == 'tomcat11' or tomcat_version == '11':
+                if not os.path.exists(self.__tomcat11_path_bak + '/conf/server.xml'): return public.returnMsg(
+                    False, "Tomcat11 configuration file does not exist, please reinstall Tomcat11"
+                    )
+                public.ExecShell(
+                    'cp -r %s/* %s && chown -R www:www %s' % (
+                    self.__tomcat11_path_bak, self.__site_path + domain, self.__site_path + domain)
                     )
             # server.xml
             if os.path.exists(self.__site_path + domain + '/conf/server.xml'):
@@ -4733,11 +4789,13 @@ make
         if not projects:
             return public.returnMsg(False, "No sites selected for startup")
         
-        neizhi_projects = {'7': False, '8': False, '9': False}
+        neizhi_projects = {'7': False, '8': False, '9': False, '10': False, '11': False}
         _check = self.get_tomcat_version(None)
         if not _check["tomcat7"]["status"]: neizhi_projects.pop("7")
         if not _check["tomcat8"]["status"]: neizhi_projects.pop("8")
         if not _check["tomcat9"]["status"]: neizhi_projects.pop("9")
+        if not _check["tomcat10"]["status"]: neizhi_projects.pop("10")
+        if not _check["tomcat11"]["status"]: neizhi_projects.pop("11")
         springboot_projects = []
         duli_projects = []
         error_list = []

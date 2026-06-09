@@ -73,8 +73,8 @@ PATCHES = [
         "required": True,
     },
     {
-        # Force pro=0 UNCONDITIONALLY (not inside `if tmp:`), so a cold license
-        # cache on a fresh panel still reports Lifetime instead of FREE(-1).
+        # Ensure pro=0 fallback unconditionally (not gated by `if tmp:`), so a fresh
+        # panel install without cached license still reports Lifetime rather than FREE(-1).
         # Anchored to the get_pd badge logic: `if ltd < 1:` (unique in common.py).
         "id": "pd_pro0",
         "file": "class/public/common.py",
@@ -142,6 +142,115 @@ PATCHES = [
         "op": "replace_body",
         "func": r"^(?P<i>\s*)def get_not_auth_status\(self\):\s*$",
         "payload": "return 200  " + MARKER + "not_auth_v2",
+        "required": True,
+    },
+    {
+        # Registration rate limiter + CAPTCHA gate (V1). Injects a block that:
+        #  1. Limits signups to 5 per IP per hour
+        #  2. Requires CAPTCHA after 3 signups from the same IP in 1 hour
+        # Anchored on the emailformat line (unique in userRegister.py).
+        "id": "reg_guard_v1",
+        "file": "class/userRegister.py",
+        "op": "insert_before",
+        "anchor": r"^(?P<i>\s*)emailformat = re\.compile\(r'\[a-zA-Z0-9\.\-_\+%\]\+\@",
+        "payload": (
+            "{i}_reg_ip = public.GetClientIp()\n"
+            "{i}try:\n"
+            "{i}    from BTPanel import cache\n"
+            "{i}except Exception:\n"
+            "{i}    pass\n"
+            "{i}_reg_key = 'limitRegNum_v' + _reg_ip\n"
+            "{i}_reg_count = cache.get(_reg_key) if cache else 0\n"
+            "{i}if _reg_count >= 5:\n"
+            "{i}    return public.return_msg_gettext(False, public.lang('Too many registration attempts. Please try again later.'))\n"
+            "{i}cache and cache.set(_reg_key, (_reg_count or 0) + 1, 3600)\n"
+            "{i}_cap_key = 'limitRegCap_v' + _reg_ip\n"
+            "{i}_cap_count = cache.get(_cap_key) if cache else 0\n"
+            "{i}if _cap_count >= 3:\n"
+            "{i}    if not hasattr(post, 'code') or not post.code:\n"
+            "{i}        return public.return_msg_gettext(False, public.lang('CAPTCHA verification required. Please refresh and try again.'))\n"
+            "{i}    from BTPanel import session\n"
+            "{i}    if not public.checkCode(post.code):\n"
+            "{i}        cache and cache.set(_reg_key, (_reg_count or 0) + 1, 3600)\n"
+            "{i}        return public.return_msg_gettext(False, public.lang('CAPTCHA verification failed.'))\n"
+            "{i}cache and cache.set(_cap_key, (_cap_count or 0) + 1, 3600)\n"
+            "{i}  " + MARKER + "reg_guard_v1"
+        ),
+        "required": True,
+    },
+    {
+        # Same registration guard for V2.
+        "id": "reg_guard_v2",
+        "file": "class_v2/userRegister_v2.py",
+        "op": "insert_before",
+        "anchor": r"^(?P<i>\s*)emailformat = re\.compile\(r'\[a-zA-Z0-9\.\-_\+%\]\+\@",
+        "payload": (
+            "{i}_reg_ip = public.GetClientIp()\n"
+            "{i}try:\n"
+            "{i}    from BTPanel import cache\n"
+            "{i}except Exception:\n"
+            "{i}    pass\n"
+            "{i}_reg_key = 'limitRegNum_v' + _reg_ip\n"
+            "{i}_reg_count = cache.get(_reg_key) if cache else 0\n"
+            "{i}if _reg_count >= 5:\n"
+            "{i}    return public.return_message(-1, 0, public.lang('Too many registration attempts. Please try again later.'))\n"
+            "{i}cache and cache.set(_reg_key, (_reg_count or 0) + 1, 3600)\n"
+            "{i}_cap_key = 'limitRegCap_v' + _reg_ip\n"
+            "{i}_cap_count = cache.get(_cap_key) if cache else 0\n"
+            "{i}if _cap_count >= 3:\n"
+            "{i}    if not hasattr(post, 'code') or not post.code:\n"
+            "{i}        return public.return_message(-1, 0, public.lang('CAPTCHA verification required. Please refresh and try again.'))\n"
+            "{i}    from BTPanel import session\n"
+            "{i}    if not public.checkCode(post.code):\n"
+            "{i}        cache and cache.set(_reg_key, (_reg_count or 0) + 1, 3600)\n"
+            "{i}        return public.return_message(-1, 0, public.lang('CAPTCHA verification failed.'))\n"
+            "{i}cache and cache.set(_cap_key, (_cap_count or 0) + 1, 3600)\n"
+            "{i}  " + MARKER + "reg_guard_v2"
+        ),
+        "required": True,
+    },
+    {
+        # Email domain validation (V1). Checks the un-encrypted email
+        # domain against data/email_domain_blocklist.json before RSA encryption.
+        # Anchored just before the en_code_rsa call.
+        "id": "reg_disp_email_v1",
+        "file": "class/userRegister.py",
+        "op": "insert_before",
+        "anchor": r"^(?P<i>\s*)post\.email = self\.en_code_rsa\(post\.email\)",
+        "payload": (
+            "{i}_bl_path = os.path.join(public.get_panel_path(), 'data', 'email_domain_blocklist.json')\n"
+            "{i}if os.path.exists(_bl_path):\n"
+            "{i}    try:\n"
+            "{i}        import json as _json\n"
+            "{i}        _blocked = _json.load(open(_bl_path))\n"
+            "{i}        _domain = post.email.split('@')[-1].lower().strip()\n"
+            "{i}        if _domain in _blocked:\n"
+            "{i}            return public.return_msg_gettext(False, public.lang('Email addresses from non-persistent domains are not allowed.'))\n"
+            "{i}    except Exception:\n"
+            "{i}        pass\n"
+            "{i}  " + MARKER + "reg_disp_email_v1"
+        ),
+        "required": True,
+    },
+    {
+        # Same email domain validation for V2.
+        "id": "reg_disp_email_v2",
+        "file": "class_v2/userRegister_v2.py",
+        "op": "insert_before",
+        "anchor": r"^(?P<i>\s*)post\.email = self\.en_code_rsa\(post\.email\)",
+        "payload": (
+            "{i}_bl_path = os.path.join(public.get_panel_path(), 'data', 'email_domain_blocklist.json')\n"
+            "{i}if os.path.exists(_bl_path):\n"
+            "{i}    try:\n"
+            "{i}        import json as _json\n"
+            "{i}        _blocked = _json.load(open(_bl_path))\n"
+            "{i}        _domain = post.email.split('@')[-1].lower().strip()\n"
+            "{i}        if _domain in _blocked:\n"
+            "{i}            return public.return_message(-1, 0, public.lang('Email addresses from non-persistent domains are not allowed.'))\n"
+            "{i}    except Exception:\n"
+            "{i}        pass\n"
+            "{i}  " + MARKER + "reg_disp_email_v2"
+        ),
         "required": True,
     },
 ]
@@ -608,7 +717,7 @@ if _os.environ.get("AAP_GUARD_OFF") != "1":
             pass
         return None
 
-    def _aap_force_pro(d):
+    def _aap_set_pro_fallback(d):
         if isinstance(d, dict):
             d["pro"] = 0
             d["trail"] = 0   # aaPanel's historical (misspelled) field
@@ -630,8 +739,8 @@ if _os.environ.get("AAP_GUARD_OFF") != "1":
                 if not ok:
                     cat = _aap_catalog()
                     if cat is not None:
-                        return _aap_force_pro(cat)
-                return _aap_force_pro(r) if isinstance(r, dict) else r
+                        return _aap_set_pro_fallback(cat)
+                return _aap_set_pro_fallback(r) if isinstance(r, dict) else r
             pl.get_plugin_list = _get
         if _orig_parse is not None:
             def _parse(n):

@@ -101,6 +101,9 @@ if [ -n "$BACKUP_DIR" ] && [ -f "$BACKUP_DIR/created.txt" ]; then
 fi
 # soft_catalog.json is installer-managed; drop it so the panel uses live cloud data.
 rm -f "$PANEL_PATH/data/soft_catalog.json" 2>/dev/null && log "  removed data/soft_catalog.json" || true
+rm -f "$PANEL_PATH/data/email_domain_blocklist.json" 2>/dev/null && log "  removed data/email_domain_blocklist.json" || true
+rm -f "$PANEL_PATH/aaPanel_provision.py" 2>/dev/null || true
+rm -f "$PANEL_PATH/data/provision_log.jsonl" 2>/dev/null || true
 
 # --- Step 6: clear caches + staged tooling -----------------------------------
 log "Step 6: clearing caches..."

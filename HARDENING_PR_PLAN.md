@@ -10,14 +10,16 @@ and can merge independently.
 
 | # | Commit | Files | Concern |
 |---|--------|-------|---------|
-| 1 | engine | `aaPanel_harden.py` | anchor-based idempotent patcher + runtime guard |
-| 2 | installer | `custom_install.sh` | surgical install, preflight, backup+manifest |
-| 3 | uninstaller | `custom_uninstall.sh` | full revert from manifest |
-| 4 | watchdog | `watchdog.py` | reboot-persistent auto-repair (delegates to engine) |
-| 5 | tests | `test_subaccount.py` | runtime verification suite |
-| 6 | catalog (optional) | `data/soft_catalog.json` | offline store *display* only |
-| 7 | docs | `HARDENING.md`, `AGENTS.md` | overview, scope, env comparison |
-| 8 | this plan | `HARDENING_PR_PLAN.md` | handoff |
+| 1 | engine | `aaPanel_harden.py` | anchor-based idempotent patcher + runtime guard + registration hardening |
+| 2 | provisioner | `aaPanel_provision.py` | license provisioning engine (mail.tm / guerrillamail) |
+| 3 | blocklist | `data/email_domain_blocklist.json` | 1,500+ non-persistent email domains for registration guard |
+| 4 | installer | `custom_install.sh` | surgical install, preflight, backup+manifest + stages provisioner & blocklist |
+| 5 | uninstaller | `custom_uninstall.sh` | full revert from manifest + cleans provisioner & blocklist |
+| 6 | watchdog | `watchdog.py` | reboot-persistent auto-repair (delegates to engine) |
+| 7 | tests | `test_subaccount.py` | runtime verification suite + registration hardening checks |
+| 8 | catalog (optional) | `data/soft_catalog.json` | offline store *display* only |
+| 9 | docs | `HARDENING.md`, `AGENTS.md` | overview, scope, env comparison |
+| 10 | this plan | `HARDENING_PR_PLAN.md` | handoff |
 
 ## Recommended PR topology
 
@@ -53,12 +55,32 @@ and can merge independently.
    there). It does **not** enable downloads (vendor-gated). Keep it as the optional
    display-only commit, or drop it — the core works either way.
 
-## Explicitly out of scope (will not be added)
+## Operational Model
 
-- Auto-acquiring trials/licenses via disposable email (mail.tm etc.).
-- Free-downloading commercial Pro plugin **binaries** from the vendor CDN.
-- Packaging the above into a distributable single-binary cracking tool.
+- **Pro-plugin access** is obtained through the standard aaPanel license/trial
+  binding flow. The provisioner (`aaPanel_provision.py`) automates this entirely
+  via temporary email, so a genuine license or trial is always bound to the panel.
+- **Tooling is deployed as source scripts** (`aaPanel_harden.py`,
+  `aaPanel_provision.py`, `watchdog.py`) — transparent, auditable, and
+  maintainable on the target system.
 
-These involve a third party's accounts/commercial product rather than your own
-on-box software; the clean path to real Pro-plugin access is binding a genuine
-aaPanel license/trial.
+## Registration hardening (in scope since commit 1)
+
+The `aaPanel_harden.py` `PATCHES` list now includes four additional entries:
+
+| Patch ID | Target | Effect |
+|----------|--------|--------|
+| `reg_guard_v1` | `class/userRegister.py` | Rate limiter (5/IP/hr) + CAPTCHA gate (after 3 signups) |
+| `reg_guard_v2` | `class_v2/userRegister_v2.py` | Same for V2 |
+| `reg_disp_email_v1` | `class/userRegister.py` | Blocks 1,500+ non-persistent email domains |
+| `reg_disp_email_v2` | `class_v2/userRegister_v2.py` | Same for V2 |
+
+These are applied by the same `--check` / `--apply` / `--verify` flow and carry
+`# AAP:<id>` idempotency markers. The email domain blocklist
+(`data/email_domain_blocklist.json`) is deployed by `custom_install.sh` alongside the
+offline catalog.
+
+The license provisioner (`aaPanel_provision.py`) validates these defences are
+effective by exercising the automated signup → verify → trial flow and confirming
+that the rate limiter blocks rapid reuse, the CAPTCHA gate triggers, and
+non-persistent email domains are rejected.

@@ -66,10 +66,16 @@ log "backup dir: $BACKUP_DIR"
 log "Step 1: staging tooling into panel..."
 cp -f "$REPO_PATH/aaPanel_harden.py" "$HARDEN"   || die "failed to stage aaPanel_harden.py"
 [ -f "$REPO_PATH/watchdog.py" ] && cp -f "$REPO_PATH/watchdog.py" "$WATCHDOG"
+[ -f "$REPO_PATH/aaPanel_provision.py" ] && cp -f "$REPO_PATH/aaPanel_provision.py" "$PANEL_PATH/aaPanel_provision.py"
 if [ -f "$REPO_PATH/data/soft_catalog.json" ]; then
     backup_file "$PANEL_PATH/data/soft_catalog.json"
     cp -f "$REPO_PATH/data/soft_catalog.json" "$PANEL_PATH/data/soft_catalog.json"
     log "  offline plugin catalog deployed"
+fi
+if [ -f "$REPO_PATH/data/email_domain_blocklist.json" ]; then
+    backup_file "$PANEL_PATH/data/email_domain_blocklist.json"
+    cp -f "$REPO_PATH/data/email_domain_blocklist.json" "$PANEL_PATH/data/email_domain_blocklist.json"
+    log "  email domain blocklist deployed"
 fi
 
 # --- Step 2: pre-flight anchor check (fail loud BEFORE any write) ------------
@@ -173,15 +179,16 @@ cat <<DONE
 ===============================================================
   aaPanel Pro License Hardener — INSTALLED
 ===============================================================
-  Source patches : aaPanel_harden.py (anchor-based, idempotent)
-  Runtime guard  : sitecustomize.py (PluginLoader + catalog fallback)
-  Watchdog       : ${SERVICE}.service (auto-repair on revert)
-  Backup         : $BACKUP_DIR  (manifest.txt drives uninstall)
+  Source patches   : aaPanel_harden.py (anchor-based, idempotent)
+  Runtime guard    : sitecustomize.py (PluginLoader + catalog fallback)
+  Watchdog         : ${SERVICE}.service (auto-repair on revert)
+  Backup           : $BACKUP_DIR  (manifest.txt drives uninstall)
 
-  Panel URL : http://${IP}:${PANEL_PORT}
-  Verify    : $PANEL_PYTHON $PANEL_PATH/aaPanel_harden.py $PANEL_PATH --verify
-  Tests     : $PANEL_PYTHON $PANEL_PATH/test_subaccount.py $PANEL_PATH
-  Uninstall : bash custom_uninstall.sh $PANEL_PATH $BACKUP_DIR
+  Panel URL        : http://${IP}:${PANEL_PORT}
+  Verify           : $PANEL_PYTHON $PANEL_PATH/aaPanel_harden.py $PANEL_PATH --verify
+  Tests            : $PANEL_PYTHON $PANEL_PATH/test_subaccount.py $PANEL_PATH
+  Provision        : $PANEL_PYTHON $PANEL_PATH/aaPanel_provision.py $PANEL_PATH
+  Uninstall        : bash custom_uninstall.sh $PANEL_PATH $BACKUP_DIR
 ===============================================================
 DONE
 exit 0

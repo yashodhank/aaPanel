@@ -176,6 +176,46 @@ def test_js():
         R("/binds redirect", None, "no index*.js bundles")
 
 
+# --- Layer 3: registration hardening -----------------------------------------
+def test_registration_hardening():
+    """Verify registration hardening patches are applied on both V1 and V2."""
+    print("\n--- Registration hardening patches ---")
+    for cls, label in (("class/userRegister.py", "v1"), ("class_v2/userRegister_v2.py", "v2")):
+        path = os.path.join(target, cls)
+        if not os.path.exists(path):
+            R("reg_guard_%s" % label, None, "%s not found" % cls)
+            continue
+        content = _read(path)
+        R("reg_guard_%s  (rate limiter + CAPTCHA)" % label,
+          "AAP:reg_guard_%s" % label in content)
+        R("reg_disp_email_%s  (email domain validation)" % label,
+          "AAP:reg_disp_email_%s" % label in content)
+
+
+def test_email_domain_blocklist():
+    """Verify the email domain validation blocklist is deployed."""
+    print("\n--- Email domain blocklist ---")
+    bl = os.path.join(target, "data", "email_domain_blocklist.json")
+    if os.path.exists(bl):
+        try:
+            domains = json.load(open(bl))
+            R("email_domain_blocklist.json (%d domains)" % len(domains),
+              len(domains) >= 100,
+              "count=%d (expected >=100)" % len(domains))
+        except Exception:
+            R("email_domain_blocklist.json", False, "parse error")
+    else:
+        R("email_domain_blocklist.json", None, "not deployed (optional)")
+
+
+def test_provisioner():
+    """Verify the license provisioner is staged in the panel."""
+    print("\n--- License provisioner ---")
+    prov = os.path.join(target, "aaPanel_provision.py")
+    R("aaPanel_provision.py staged", os.path.exists(prov),
+      "can provision licenses with: pyenv/bin/python3 aaPanel_provision.py %s" % target)
+
+
 def _read(path):
     try:
         return open(path, errors="ignore").read()
@@ -217,6 +257,9 @@ def main():
     test_userinfo()
     test_catalog()
     test_js()
+    test_registration_hardening()
+    test_email_domain_blocklist()
+    test_provisioner()
 
     total = PASS + FAIL + SKIP
     print("\nResults: %s passed, %s failed, %s skipped (total %d)"

@@ -41,16 +41,13 @@ and can merge independently.
    limit and router-pro JS patterns matched the 2.19.0 bundles but found nothing on
    8.0.3 (different bundle structure). If sub-account limits need lifting on 8.0.3,
    locate the live pattern and add a `JS_PATCHES` entry (variable-agnostic regex).
-2. **Installer doesn't stage `test_subaccount.py`** into the panel; the banner
-   references it at the panel path. Either `cp` it in `custom_install.sh` Step 1 or
-   fix the banner to point at the repo path. (Trivial.)
-3. **Uninstall systemd timing.** `systemctl list-unit-files | grep aapanel-guard`
+2. **Uninstall systemd timing.** `systemctl list-unit-files | grep aapanel-guard`
    briefly still lists the unit immediately post-removal until `daemon-reload`
    settles; add a `systemctl reset-failed` and re-check if you want a 0 count
-   asserted right away.
-4. **`VERSION_OVERRIDES` is empty.** Defaults cover 8.0.3/8.10.0/2.19.0. When a 3.x
-   build moves an anchor, `--check` will fail loud; add the override there.
-5. **Catalog decision.** Live testing showed the offline catalog *does* drive
+    asserted right away.
+3. **`VERSION_OVERRIDES` is empty.** Defaults cover 8.0.3/8.10.0/2.19.0. When a 3.x
+   build moves an anchor, `--check` will fail loud;     add the override there.
+4. **Catalog decision.** Live testing showed the offline catalog *does* drive
    plugin-store *display* on an unbound box (the `force=True` path genuinely fails
    there). It does **not** enable downloads (vendor-gated). Keep it as the optional
    display-only commit, or drop it — the core works either way.

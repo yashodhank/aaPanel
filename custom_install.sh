@@ -67,6 +67,7 @@ log "Step 1: staging tooling into panel..."
 cp -f "$REPO_PATH/aaPanel_harden.py" "$HARDEN"   || die "failed to stage aaPanel_harden.py"
 [ -f "$REPO_PATH/watchdog.py" ] && cp -f "$REPO_PATH/watchdog.py" "$WATCHDOG"
 [ -f "$REPO_PATH/aaPanel_provision.py" ] && cp -f "$REPO_PATH/aaPanel_provision.py" "$PANEL_PATH/aaPanel_provision.py"
+[ -f "$REPO_PATH/test_subaccount.py" ] && cp -f "$REPO_PATH/test_subaccount.py" "$PANEL_PATH/test_subaccount.py"
 if [ -f "$REPO_PATH/data/soft_catalog.json" ]; then
     backup_file "$PANEL_PATH/data/soft_catalog.json"
     cp -f "$REPO_PATH/data/soft_catalog.json" "$PANEL_PATH/data/soft_catalog.json"

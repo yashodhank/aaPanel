@@ -103,13 +103,14 @@ fi
 rm -f "$PANEL_PATH/data/soft_catalog.json" 2>/dev/null && log "  removed data/soft_catalog.json" || true
 rm -f "$PANEL_PATH/data/email_domain_blocklist.json" 2>/dev/null && log "  removed data/email_domain_blocklist.json" || true
 rm -f "$PANEL_PATH/aaPanel_provision.py" 2>/dev/null || true
+rm -f "$PANEL_PATH/test_subaccount.py" 2>/dev/null || true
 rm -f "$PANEL_PATH/data/provision_log.jsonl" 2>/dev/null || true
 
 # --- Step 6: clear caches + staged tooling -----------------------------------
 log "Step 6: clearing caches..."
 find "$PANEL_PATH/class" "$PANEL_PATH/class_v2" "$PANEL_PATH/BTPanel" \
      -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
-rm -f "$HARDEN" "$PANEL_PATH/watchdog.py" 2>/dev/null || true
+rm -f "$HARDEN" "$PANEL_PATH/watchdog.py" "$PANEL_PATH/test_subaccount.py" 2>/dev/null || true
 
 # --- Step 7: restart panel ---------------------------------------------------
 log "Step 7: restarting panel..."
